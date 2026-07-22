@@ -6,7 +6,8 @@ build, its own database, its own deployable — following the true microservices
 than a shared multi-module build.
 
 > **Contributing / conventions:** architecture rules, layering, and coding standards live in
-> [`CLAUDE.md`](CLAUDE.md). Read it before adding a service or opening a PR.
+> [`CLAUDE.md`](CLAUDE.md). Read it before adding a service or opening a PR. Planned hardening
+> work (resilience, observability, security) is tracked in [`ROADMAP.md`](ROADMAP.md).
 
 ## Architecture
 
