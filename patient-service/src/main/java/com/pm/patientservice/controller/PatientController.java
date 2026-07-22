@@ -1,23 +1,82 @@
 package com.pm.patientservice.controller;
 
+import com.pm.patientservice.dto.PagedResponse;
+import com.pm.patientservice.dto.PatientRequestDTO;
 import com.pm.patientservice.dto.PatientResponseDTO;
 import com.pm.patientservice.service.PatientService;
-import java.util.List;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
+import java.util.UUID;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.ResponseEntity;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.web.PageableDefault;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
+/**
+ * HTTP concerns only: bind, validate, delegate, return a DTO. Success status codes are the
+ * default 200 unless declared with {@code @ResponseStatus}; error codes (404/409/400) are
+ * produced by the global exception handler, never by branching here.
+ */
 @RestController
 @RequestMapping("/patients")
 @RequiredArgsConstructor
+@Tag(name = "Patients", description = "Manage patient records")
 public class PatientController {
 
     private final PatientService patientService;
 
+    @Operation(summary = "List patients", description = "Paginated. e.g. ?page=0&size=20&sort=name,asc")
     @GetMapping
-    public ResponseEntity<List<PatientResponseDTO>> getPatients() {
-        return ResponseEntity.ok(patientService.getPatients());
+    public PagedResponse<PatientResponseDTO> getPatients(
+            @PageableDefault(size = 20, sort = "name", direction = Sort.Direction.ASC) Pageable pageable) {
+        return patientService.getPatients(pageable);
+    }
+
+    @Operation(summary = "Get a patient")
+    @ApiResponse(responseCode = "404", description = "No such patient")
+    @GetMapping("/{id}")
+    public PatientResponseDTO getPatient(@PathVariable UUID id) {
+        return patientService.getPatient(id);
+    }
+
+    @Operation(summary = "Create a patient")
+    @ApiResponse(responseCode = "201", description = "Created")
+    @ApiResponse(responseCode = "400", description = "Validation failed")
+    @ApiResponse(responseCode = "409", description = "Email already in use")
+    @PostMapping
+    @ResponseStatus(HttpStatus.CREATED)
+    public PatientResponseDTO createPatient(@Valid @RequestBody PatientRequestDTO request) {
+        return patientService.createPatient(request);
+    }
+
+    @Operation(summary = "Update a patient", description = "Full replacement of the patient's details.")
+    @ApiResponse(responseCode = "404", description = "No such patient")
+    @ApiResponse(responseCode = "400", description = "Validation failed")
+    @ApiResponse(responseCode = "409", description = "Email already in use")
+    @PutMapping("/{id}")
+    public PatientResponseDTO updatePatient(
+            @PathVariable UUID id, @Valid @RequestBody PatientRequestDTO request) {
+        return patientService.updatePatient(id, request);
+    }
+
+    @Operation(summary = "Delete a patient")
+    @ApiResponse(responseCode = "204", description = "Deleted")
+    @ApiResponse(responseCode = "404", description = "No such patient")
+    @DeleteMapping("/{id}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deletePatient(@PathVariable UUID id) {
+        patientService.deletePatient(id);
     }
 }

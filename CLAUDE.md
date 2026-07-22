@@ -17,6 +17,8 @@ multi-module reactor build.
 | Validation | Jakarta Bean Validation — on **DTOs**, not entities |
 | Mapping | **MapStruct** (`@Mapper`) — compile-time, `unmappedTargetPolicy=ERROR` |
 | Boilerplate | **Lombok** (`@RequiredArgsConstructor` for injection) |
+| API docs | **springdoc-openapi** — Swagger UI, annotated endpoints |
+| Errors | RFC 7807 `ProblemDetail` via `@RestControllerAdvice` |
 | Containers | Docker + docker-compose per environment |
 
 ## Repository layout
@@ -75,6 +77,34 @@ com.pm.<service>/
   provided-scope deps; `~/.m2/toolchains.xml` (JDK 17) guards against the system `mvn`
   running on Java 26.
 
+### REST / API conventions
+
+- **Controllers do HTTP concerns only**: bind, validate, delegate, return a DTO. No business
+  logic, no `if/else` on error conditions. Return the DTO directly (not `ResponseEntity`)
+  unless headers are needed.
+- **Status codes**: happy-path only in the controller — default `200`, or
+  `@ResponseStatus(CREATED)` for `POST` (`201`), `@ResponseStatus(NO_CONTENT)` for `DELETE`
+  (`204`). Error codes come from the exception handler, never hand-branched.
+
+  | Op | Success | Errors |
+  |----|---------|--------|
+  | `GET` list | 200 | — |
+  | `GET /{id}` | 200 | 404 |
+  | `POST` | 201 | 400, 409 |
+  | `PUT /{id}` | 200 | 400, 404, 409 |
+  | `DELETE /{id}` | 204 | 404 |
+
+- **Errors are centralized**: one `@RestControllerAdvice` maps domain exceptions
+  (`*NotFoundException` → 404, `*AlreadyExistsException` → 409, validation → 400) to RFC 7807
+  `ProblemDetail`. Services throw domain exceptions; they never return null/empty for "not
+  found".
+- **Request DTOs are validated**: `record` request DTOs carry Bean Validation
+  (`@NotBlank`, `@Email`, ...); controllers annotate the body with `@Valid`.
+- **List endpoints are paginated**: accept `Pageable`; never return an unbounded `findAll()`
+  over a growable table.
+- **Every endpoint is documented** with springdoc OpenAPI (`@Operation`, `@ApiResponse`,
+  `@Tag`) so `/swagger-ui.html` stays complete.
+
 ## Build & run
 
 ```bash
@@ -89,7 +119,10 @@ cd patient-service
 
 - [x] `patient-service` scaffolded (Boot 3.5.16, MariaDB, Flyway, deps verified)
 - [x] `Patient` entity (UUID id, snake_case columns, InnoDB-bound)
+- [x] MapStruct + Lombok + records wired
+- [x] Full CRUD: repository → service (interface+impl) → DTOs/validation → controller
+- [x] Global exception handler (`ProblemDetail`), pagination, OpenAPI/Swagger
 - [ ] `application.yml` + docker-compose (MariaDB)
-- [ ] Flyway `V1__create_patients_table.sql`
-- [ ] repository → service → DTO/validation → controller → exception handler
+- [ ] Flyway `V1__create_patient_table.sql`
+- [ ] boot & verify endpoints end-to-end
 - [ ] remaining services + gateway
