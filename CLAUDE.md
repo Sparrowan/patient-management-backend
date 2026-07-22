@@ -15,6 +15,8 @@ multi-module reactor build.
 | Database | **MariaDB** (InnoDB engine — required for ACID), one DB per service |
 | Migrations | **Flyway** (`flyway-core` + `flyway-mysql`) — schema is versioned SQL, never `ddl-auto` |
 | Validation | Jakarta Bean Validation — on **DTOs**, not entities |
+| Mapping | **MapStruct** (`@Mapper`) — compile-time, `unmappedTargetPolicy=ERROR` |
+| Boilerplate | **Lombok** (`@RequiredArgsConstructor` for injection) |
 | Containers | Docker + docker-compose per environment |
 
 ## Repository layout
@@ -64,6 +66,14 @@ com.pm.<service>/
 - **Documentation**: comment the *why*, not the *what*. Javadoc on public API (service
   interfaces, custom exceptions, non-obvious contracts) + "why" notes where reality is
   surprising. No comments that restate code, no commented-out code, rely on clear names.
+- **DTOs are `record`s**; entity↔DTO mapping is a MapStruct `@Mapper` interface (never
+  hand-written). Use real types (`UUID`, `LocalDate`) in DTOs — Jackson serializes them and
+  MapStruct maps 1:1 with no conversion.
+- **Constructor injection via Lombok `@RequiredArgsConstructor`** on `final` fields — no
+  hand-written constructors, no field `@Autowired`.
+- **Build**: use `./mvnw` (runs on JDK 17). Lombok + MapStruct processors are declared as
+  provided-scope deps; `~/.m2/toolchains.xml` (JDK 17) guards against the system `mvn`
+  running on Java 26.
 
 ## Build & run
 

@@ -2,24 +2,19 @@ package com.pm.patientservice.mapper;
 
 import com.pm.patientservice.dto.PatientResponseDTO;
 import com.pm.patientservice.model.Patient;
+import java.util.List;
+import org.mapstruct.Mapper;
 
 /**
- * Converts between {@link Patient} entities and their DTO representations. Keeps mapping logic
- * out of the service and controller layers.
+ * Entity -&gt; DTO mapping for patients. MapStruct generates the implementation at compile time
+ * (no reflection) and registers it as a Spring bean (componentModel=spring, set globally in the
+ * pom). Fields map by name/type; adding an unmapped field to a DTO fails the build
+ * (unmappedTargetPolicy=ERROR).
  */
-public class PatientMapper {
+@Mapper
+public interface PatientMapper {
 
-    private PatientMapper() {
-        // utility class — not instantiable
-    }
+    PatientResponseDTO toResponse(Patient patient);
 
-    public static PatientResponseDTO toDTO(Patient patient) {
-        PatientResponseDTO dto = new PatientResponseDTO();
-        dto.setId(patient.getId().toString());
-        dto.setName(patient.getName());
-        dto.setEmail(patient.getEmail());
-        dto.setAddress(patient.getAddress());
-        dto.setDateOfBirth(patient.getDateOfBirth().toString());
-        return dto;
-    }
+    List<PatientResponseDTO> toResponses(List<Patient> patients);
 }
