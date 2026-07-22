@@ -8,15 +8,21 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import java.time.LocalDate;
 import java.util.UUID;
+import lombok.Getter;
 
 /**
  * Patient aggregate. A rich domain model: state changes go through intention-revealing
  * behavior ({@link #register}, {@link #updateDetails}), never public setters, so the entity
  * owns its own invariants. {@code registeredDate} in particular is stamped at registration and
  * cannot be set or backdated by callers.
+ *
+ * <p>Lombok generates getters only — deliberately no {@code @Setter}/{@code @Data}, which would
+ * reintroduce setters (breaking encapsulation) and, via toString/equals, touch state in ways
+ * that misbehave on JPA entities.
  */
 @Entity
-@Table(name = "patient")
+@Table(name = "patients")
+@Getter
 public class Patient {
 
     @Id
@@ -64,29 +70,5 @@ public class Patient {
         this.email = email;
         this.address = address;
         this.dateOfBirth = dateOfBirth;
-    }
-
-    public UUID getId() {
-        return id;
-    }
-
-    public String getName() {
-        return name;
-    }
-
-    public String getEmail() {
-        return email;
-    }
-
-    public String getAddress() {
-        return address;
-    }
-
-    public LocalDate getDateOfBirth() {
-        return dateOfBirth;
-    }
-
-    public LocalDate getRegisteredDate() {
-        return registeredDate;
     }
 }

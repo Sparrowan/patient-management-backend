@@ -53,6 +53,8 @@ com.pm.<service>/
 - **Naming**: Java fields are `camelCase`; DB columns are `snake_case`. Hibernate's default
   `CamelCaseToUnderscoresNamingStrategy` bridges them (`dateOfBirth` → `date_of_birth`).
   Flyway SQL therefore uses snake_case column names.
+- **Table names are plural, entity classes singular** (`Patient` → `@Table(name = "patients")`).
+  Plural sidesteps SQL reserved-word collisions (`user`/`order`) and reads naturally.
 - **Primary keys**: `UUID` with `@GeneratedValue(strategy = GenerationType.UUID)`. Stored as
   `BINARY(16)` in MariaDB — Flyway column types must match.
 - **Schema authority is Flyway**, not Hibernate. `spring.jpa.hibernate.ddl-auto=validate`
@@ -79,6 +81,9 @@ com.pm.<service>/
   MapStruct maps 1:1 with no conversion.
 - **Constructor injection via Lombok `@RequiredArgsConstructor`** on `final` fields — no
   hand-written constructors, no field `@Autowired`.
+- **Lombok on entities: `@Getter` only.** Never `@Setter` (would break the rich model) and
+  never `@Data` (its toString/equals touch lazy state and violate JPA identity). DTOs are
+  `record`s, so they need no Lombok at all.
 - **Build**: use `./mvnw` (runs on JDK 17). Lombok + MapStruct processors are declared as
   provided-scope deps; `~/.m2/toolchains.xml` (JDK 17) guards against the system `mvn`
   running on Java 26.
@@ -129,6 +134,6 @@ cd patient-service
 - [x] Full CRUD: repository → service (interface+impl) → DTOs/validation → controller
 - [x] Global exception handler (`ProblemDetail`), pagination, OpenAPI/Swagger
 - [ ] `application.yml` + docker-compose (MariaDB)
-- [ ] Flyway `V1__create_patient_table.sql`
+- [ ] Flyway `V1__create_patients_table.sql`
 - [ ] boot & verify endpoints end-to-end
 - [ ] remaining services + gateway
