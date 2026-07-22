@@ -9,6 +9,12 @@ import jakarta.persistence.Table;
 import java.time.LocalDate;
 import java.util.UUID;
 
+/**
+ * Patient aggregate. A rich domain model: state changes go through intention-revealing
+ * behavior ({@link #register}, {@link #updateDetails}), never public setters, so the entity
+ * owns its own invariants. {@code registeredDate} in particular is stamped at registration and
+ * cannot be set or backdated by callers.
+ */
 @Entity
 @Table(name = "patient")
 public class Patient {
@@ -32,51 +38,55 @@ public class Patient {
     @Column(nullable = false)
     private LocalDate registeredDate;
 
-    public UUID getId() {
-        return id;
+    /** Required by JPA. Use {@link #register} to create instances. */
+    protected Patient() {
     }
 
-    public void setId(UUID id) {
-        this.id = id;
+    private Patient(String name, String email, String address, LocalDate dateOfBirth) {
+        this.name = name;
+        this.email = email;
+        this.address = address;
+        this.dateOfBirth = dateOfBirth;
+        this.registeredDate = LocalDate.now();
+    }
+
+    /**
+     * Registers a new patient, stamping the registration date. Registration date is an
+     * invariant the entity owns — it is set here and never accepted from the client.
+     */
+    public static Patient register(String name, String email, String address, LocalDate dateOfBirth) {
+        return new Patient(name, email, address, dateOfBirth);
+    }
+
+    /** Replaces the mutable details. Identity and registration date are unaffected. */
+    public void updateDetails(String name, String email, String address, LocalDate dateOfBirth) {
+        this.name = name;
+        this.email = email;
+        this.address = address;
+        this.dateOfBirth = dateOfBirth;
+    }
+
+    public UUID getId() {
+        return id;
     }
 
     public String getName() {
         return name;
     }
 
-    public void setName(String name) {
-        this.name = name;
-    }
-
     public String getEmail() {
         return email;
-    }
-
-    public void setEmail(String email) {
-        this.email = email;
     }
 
     public String getAddress() {
         return address;
     }
 
-    public void setAddress(String address) {
-        this.address = address;
-    }
-
     public LocalDate getDateOfBirth() {
         return dateOfBirth;
     }
 
-    public void setDateOfBirth(LocalDate dateOfBirth) {
-        this.dateOfBirth = dateOfBirth;
-    }
-
     public LocalDate getRegisteredDate() {
         return registeredDate;
-    }
-
-    public void setRegisteredDate(LocalDate registeredDate) {
-        this.registeredDate = registeredDate;
     }
 }

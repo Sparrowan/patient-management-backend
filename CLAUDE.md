@@ -63,8 +63,14 @@ com.pm.<service>/
   - SRP — one responsibility per layer (controller ≠ service ≠ repository).
   - DIP/OCP — controllers depend on service *interfaces*; Spring injects the impl.
   - ISP — repositories stay focused.
-- Server-set fields (e.g. `registeredDate`) are populated in the service, never accepted
-  from the client.
+- **Rich domain model, not anemic**: entities own their state changes through
+  intention-revealing behavior (static factory for creation, e.g. `Patient.register(...)`;
+  named mutators, e.g. `updateDetails(...)`). No public setters; JPA no-arg constructor is
+  `protected`. Creation goes through the domain factory, so mappers have `toResponse` only,
+  no `toEntity`. Apply where it earns its keep — don't push infrastructure or cross-aggregate
+  logic into entities.
+- Server-set fields (e.g. `registeredDate`) are an invariant the entity stamps at creation,
+  never accepted from the client.
 - **Documentation**: comment the *why*, not the *what*. Javadoc on public API (service
   interfaces, custom exceptions, non-obvious contracts) + "why" notes where reality is
   surprising. No comments that restate code, no commented-out code, rely on clear names.

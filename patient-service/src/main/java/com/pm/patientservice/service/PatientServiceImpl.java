@@ -8,7 +8,6 @@ import com.pm.patientservice.exception.PatientNotFoundException;
 import com.pm.patientservice.mapper.PatientMapper;
 import com.pm.patientservice.model.Patient;
 import com.pm.patientservice.repository.PatientRepository;
-import java.time.LocalDate;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Pageable;
@@ -40,8 +39,8 @@ public class PatientServiceImpl implements PatientService {
         if (patientRepository.existsByEmail(request.email())) {
             throw new EmailAlreadyExistsException(request.email());
         }
-        Patient patient = patientMapper.toEntity(request);
-        patient.setRegisteredDate(LocalDate.now());
+        Patient patient = Patient.register(
+                request.name(), request.email(), request.address(), request.dateOfBirth());
         return patientMapper.toResponse(patientRepository.save(patient));
     }
 
@@ -52,10 +51,8 @@ public class PatientServiceImpl implements PatientService {
         if (patientRepository.existsByEmailAndIdNot(request.email(), id)) {
             throw new EmailAlreadyExistsException(request.email());
         }
-        patient.setName(request.name());
-        patient.setEmail(request.email());
-        patient.setAddress(request.address());
-        patient.setDateOfBirth(request.dateOfBirth());
+        patient.updateDetails(
+                request.name(), request.email(), request.address(), request.dateOfBirth());
         return patientMapper.toResponse(patientRepository.save(patient));
     }
 
