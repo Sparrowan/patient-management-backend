@@ -55,8 +55,9 @@ com.pm.<service>/
   Flyway SQL therefore uses snake_case column names.
 - **Table names are plural, entity classes singular** (`Patient` → `@Table(name = "patients")`).
   Plural sidesteps SQL reserved-word collisions (`user`/`order`) and reads naturally.
-- **Primary keys**: `UUID` with `@GeneratedValue(strategy = GenerationType.UUID)`. Stored as
-  `BINARY(16)` in MariaDB — Flyway column types must match.
+- **Primary keys**: `UUID` with `@GeneratedValue(strategy = GenerationType.UUID)`. On MariaDB
+  10.7+ this maps to the **native `UUID` column type** (what Hibernate's MariaDBDialect
+  validates against) — Flyway migrations use `id UUID`, not `BINARY(16)`.
 - **Schema authority is Flyway**, not Hibernate. `spring.jpa.hibernate.ddl-auto=validate`
   (or `none`) in every service. Migrations live in `src/main/resources/db/migration/`,
   named `V<n>__<description>.sql`.
@@ -133,7 +134,8 @@ cd patient-service
 - [x] MapStruct + Lombok + records wired
 - [x] Full CRUD: repository → service (interface+impl) → DTOs/validation → controller
 - [x] Global exception handler (`ProblemDetail`), pagination, OpenAPI/Swagger
-- [ ] `application.yml` + docker-compose (MariaDB)
-- [ ] Flyway `V1__create_patients_table.sql`
-- [ ] boot & verify endpoints end-to-end
+- [x] Config (`application.properties` + `.env` via spring-dotenv), local MariaDB `patient_db`
+- [x] Flyway `V1__create_patients_table.sql` (native `UUID`, InnoDB)
+- [x] Booted & verified end-to-end (201/200/400/404/409, Swagger, DB persistence)
+- [ ] Tier 1 hardening (tests, `@Version`, auditing, soft-delete) — see ROADMAP.md
 - [ ] remaining services + gateway

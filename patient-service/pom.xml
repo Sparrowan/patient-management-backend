@@ -56,6 +56,13 @@
 			<scope>runtime</scope>
 		</dependency>
 
+		<!-- Loads a .env file into Spring's Environment so ${VAR} placeholders resolve from it. -->
+		<dependency>
+			<groupId>me.paulschwarz</groupId>
+			<artifactId>spring-dotenv</artifactId>
+			<version>4.0.0</version>
+		</dependency>
+
 		<!-- Lombok: generates getters/setters/constructors at compile time -->
 		<dependency>
 			<groupId>org.projectlombok</groupId>
