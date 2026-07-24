@@ -2,6 +2,7 @@ package com.pm.patientservice.exception;
 
 import java.util.HashMap;
 import java.util.Map;
+import org.springframework.data.mapping.PropertyReferenceException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
@@ -37,6 +38,14 @@ public class GlobalExceptionHandler {
                 HttpStatus.CONFLICT,
                 "This patient was modified by another request. Reload the latest version and retry.");
         problem.setTitle("Concurrent modification");
+        return problem;
+    }
+
+    @ExceptionHandler(PropertyReferenceException.class)
+    public ProblemDetail handleInvalidSort(PropertyReferenceException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.BAD_REQUEST, "Unknown sort property: '" + ex.getPropertyName() + "'");
+        problem.setTitle("Invalid request parameter");
         return problem;
     }
 

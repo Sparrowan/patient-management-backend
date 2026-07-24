@@ -125,4 +125,11 @@ class PatientIntegrationTest extends AbstractIntegrationTest {
                 rest.getForEntity("/patients/{id}", String.class, UUID.randomUUID());
         assertThat(missing.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
     }
+
+    @Test
+    @DisplayName("unknown sort property returns 400, not 500")
+    void unknownSortReturns400() {
+        ResponseEntity<String> bad = rest.getForEntity("/patients?sort=bogus", String.class);
+        assertThat(bad.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+    }
 }

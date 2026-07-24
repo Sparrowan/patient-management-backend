@@ -43,7 +43,9 @@ Cheap, high-impact; every future service inherits the pattern.
 - [ ] **Event-driven with Kafka** + **Outbox pattern** + **idempotent consumers** + **DLQ**.
 - [ ] **Idempotency keys** on `POST` to dedupe retried creates.
 - [ ] **Security** — `auth-service`, JWT / OAuth2 resource server, secrets in Vault, mTLS.
-- [ ] **CI/CD** + containerization + **K8s manifests / Helm**.
+- [x] **Containerization** — per-service multi-stage `Dockerfile` (non-root, healthcheck) +
+      root `docker-compose.yml` (per-service DB container). Done for `patient-service`.
+- [ ] **CI/CD** + **K8s manifests / Helm**.
 - [ ] **Contract testing** (Spring Cloud Contract) between services.
 - [ ] **Platform e2e tests** — a separate top-level module that boots multiple services
       (gateway → patient → billing → Kafka) via docker-compose/Testcontainers and tests flows

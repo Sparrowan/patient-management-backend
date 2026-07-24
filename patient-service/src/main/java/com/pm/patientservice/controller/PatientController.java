@@ -11,6 +11,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
+import org.springdoc.core.annotations.ParameterObject;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.web.PageableDefault;
@@ -41,7 +42,8 @@ public class PatientController {
     @Operation(summary = "List patients", description = "Paginated. e.g. ?page=0&size=20&sort=name,asc")
     @GetMapping
     public PagedResponse<PatientResponseDTO> getPatients(
-            @PageableDefault(size = 20, sort = "name", direction = Sort.Direction.ASC) Pageable pageable) {
+            @ParameterObject @PageableDefault(size = 20, sort = "name", direction = Sort.Direction.ASC)
+                    Pageable pageable) {
         return patientService.getPatients(pageable);
     }
 

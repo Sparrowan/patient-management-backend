@@ -118,13 +118,24 @@ com.pm.<service>/
 - **Request DTOs are validated**: `record` request DTOs carry Bean Validation
   (`@NotBlank`, `@Email`, ...); controllers annotate the body with `@Valid`.
 - **List endpoints are paginated**: accept `Pageable`; never return an unbounded `findAll()`
-  over a growable table.
+  over a growable table. Annotate the `Pageable` param with springdoc's `@ParameterObject` so
+  Swagger renders `page`/`size`/`sort` as query params (not a bogus JSON body). An unknown
+  `sort` property throws `PropertyReferenceException` → mapped to 400 in the global handler.
 - **Every endpoint is documented** with springdoc OpenAPI (`@Operation`, `@ApiResponse`,
   `@Tag`) so `/swagger-ui.html` stays complete.
 
 ## Build & run
 
-Services will run via Docker (planned — see ROADMAP). For local builds use `./mvnw`.
+Each service has its own multi-stage `Dockerfile`; the root `docker-compose.yml` orchestrates
+services + a per-service DB container.
+
+```bash
+docker compose up --build   # whole stack; patient-service on :4000, its own MariaDB container
+docker compose down         # stop (add -v to wipe the DB volume)
+```
+
+Local dev without Docker: `./mvnw spring-boot:run` (uses the host MariaDB via `.env`). The
+Dockerfile skips tests (they need Docker for Testcontainers — run them in CI / `./mvnw test`).
 
 **Build gotcha (IDE):** VSCode's Java language server (Eclipse JDT) shares `target/classes`
 with Maven and, if its project model goes stale after a POM change, compiles the MapStruct
