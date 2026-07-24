@@ -1,25 +1,34 @@
 package com.pm.patientservice;
 
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.MariaDBContainer;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
  * Base for integration tests. Boots the full application context against a real MariaDB in a
  * container (matching the production engine — native {@code UUID}, InnoDB, Flyway all exercised
- * for real, unlike an in-memory H2). {@code @ServiceConnection} wires the container's JDBC
- * details into Spring's datasource automatically.
+ * for real, unlike an in-memory H2).
  *
- * <p>The container is {@code static}, so it starts once and is shared across all integration
- * test classes in the JVM.
+ * <p><b>Singleton container pattern:</b> the container is started once in a static initializer
+ * and never stopped by the test framework (Testcontainers' Ryuk reaps it at JVM exit). This is
+ * deliberate — letting {@code @Testcontainers} manage a shared static container's lifecycle
+ * stops it after the first test class, breaking every later class that reuses the cached Spring
+ * context. Connection details are published via {@code @DynamicPropertySource}.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@Testcontainers
 public abstract class AbstractIntegrationTest {
 
-    @Container
-    @ServiceConnection
     static final MariaDBContainer<?> MARIADB = new MariaDBContainer<>("mariadb:11.7");
+
+    static {
+        MARIADB.start();
+    }
+
+    @DynamicPropertySource
+    static void datasourceProperties(DynamicPropertyRegistry registry) {
+        registry.add("spring.datasource.url", MARIADB::getJdbcUrl);
+        registry.add("spring.datasource.username", MARIADB::getUsername);
+        registry.add("spring.datasource.password", MARIADB::getPassword);
+    }
 }
