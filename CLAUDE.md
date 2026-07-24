@@ -63,6 +63,10 @@ com.pm.<service>/
   (or `none`) in every service. Migrations live in `src/main/resources/db/migration/`,
   named `V<n>__<description>.sql`.
 - **ACID**: all tables `ENGINE=InnoDB`. Service write-methods are `@Transactional`.
+- **Optimistic concurrency (Level 2)**: entities carry `@Version`; update DTOs require the
+  client's `version` and responses expose it. The service rejects a stale version with
+  `ObjectOptimisticLockingFailureException` → 409. Use `saveAndFlush` on update so the response
+  returns the *incremented* version (plain `save` flushes at commit, after mapping).
 - **SOLID where it earns its keep**:
   - SRP — one responsibility per layer (controller ≠ service ≠ repository).
   - DIP/OCP — controllers depend on service *interfaces*; Spring injects the impl.
@@ -120,13 +124,14 @@ com.pm.<service>/
 
 ## Build & run
 
-```bash
-# per service
-cd patient-service
-./mvnw compile          # compile
-./mvnw test             # run tests
-./mvnw spring-boot:run  # run locally
-```
+Services will run via Docker (planned — see ROADMAP). For local builds use `./mvnw`.
+
+**Build gotcha (IDE):** VSCode's Java language server (Eclipse JDT) shares `target/classes`
+with Maven and, if its project model goes stale after a POM change, compiles the MapStruct
+mapper with unresolved imports and clobbers Maven's output (`java.lang.Error: Unresolved
+compilation problems` / `No qualifying bean of type PatientMapper` at startup). Guarded by
+`java.autobuild.enabled: false` in `.vscode/settings.json`. If it recurs, run
+`Java: Clean Java Language Server Workspace` and reload.
 
 ## Status
 

@@ -15,8 +15,8 @@ Cheap, high-impact; every future service inherits the pattern.
 
 - [ ] **Automated tests** — Testcontainers integration tests (real MariaDB) + unit tests for
       the service layer. The single biggest gap today.
-- [ ] **Optimistic locking** — `@Version` on entities to prevent lost updates under concurrent
-      edits.
+- [x] **Optimistic locking** — `@Version` + client-supplied version on update, stale → 409
+      (Level 2 optimistic concurrency control). Done for `patient-service`.
 - [ ] **JPA auditing** — `createdAt` / `updatedAt` via a shared `BaseEntity`
       (`@EntityListeners(AuditingEntityListener.class)`). Mirror the `store` project's `BaseEntity`.
 - [ ] **Soft delete** — patients (medical records) should not be hard-deleted; regulatory.

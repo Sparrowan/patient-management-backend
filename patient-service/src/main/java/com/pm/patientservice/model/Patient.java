@@ -6,6 +6,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 import java.time.LocalDate;
 import java.util.UUID;
 import lombok.Getter;
@@ -43,6 +44,10 @@ public class Patient {
 
     @Column(nullable = false)
     private LocalDate registeredDate;
+
+    /** Optimistic-lock version. Managed by JPA; bumped on every update to detect lost updates. */
+    @Version
+    private long version;
 
     /** Required by JPA. Use {@link #register} to create instances. */
     protected Patient() {

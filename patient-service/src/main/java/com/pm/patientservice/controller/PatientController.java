@@ -3,6 +3,7 @@ package com.pm.patientservice.controller;
 import com.pm.patientservice.dto.PagedResponse;
 import com.pm.patientservice.dto.PatientRequestDTO;
 import com.pm.patientservice.dto.PatientResponseDTO;
+import com.pm.patientservice.dto.PatientUpdateRequestDTO;
 import com.pm.patientservice.service.PatientService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
@@ -61,13 +62,15 @@ public class PatientController {
         return patientService.createPatient(request);
     }
 
-    @Operation(summary = "Update a patient", description = "Full replacement of the patient's details.")
+    @Operation(
+            summary = "Update a patient",
+            description = "Full replacement. Requires the current version for optimistic concurrency.")
     @ApiResponse(responseCode = "404", description = "No such patient")
     @ApiResponse(responseCode = "400", description = "Validation failed")
-    @ApiResponse(responseCode = "409", description = "Email already in use")
+    @ApiResponse(responseCode = "409", description = "Email already in use, or stale version")
     @PutMapping("/{id}")
     public PatientResponseDTO updatePatient(
-            @PathVariable UUID id, @Valid @RequestBody PatientRequestDTO request) {
+            @PathVariable UUID id, @Valid @RequestBody PatientUpdateRequestDTO request) {
         return patientService.updatePatient(id, request);
     }
 
