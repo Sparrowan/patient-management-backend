@@ -13,8 +13,9 @@ bottom).
 
 Cheap, high-impact; every future service inherits the pattern.
 
-- [ ] **Automated tests** — Testcontainers integration tests (real MariaDB) + unit tests for
-      the service layer. The single biggest gap today.
+- [x] **Automated tests** — unit (Mockito) + web slice (`@WebMvcTest`) + integration
+      (Testcontainers, real MariaDB). 27 tests green for `patient-service`. Integration base uses
+      the singleton-container pattern (start once in a static block; `@DynamicPropertySource`).
 - [x] **Optimistic locking** — `@Version` + client-supplied version on update, stale → 409
       (Level 2 optimistic concurrency control). Done for `patient-service`.
 - [ ] **JPA auditing** — `createdAt` / `updatedAt` via a shared `BaseEntity`
@@ -44,6 +45,10 @@ Cheap, high-impact; every future service inherits the pattern.
 - [ ] **Security** — `auth-service`, JWT / OAuth2 resource server, secrets in Vault, mTLS.
 - [ ] **CI/CD** + containerization + **K8s manifests / Helm**.
 - [ ] **Contract testing** (Spring Cloud Contract) between services.
+- [ ] **Platform e2e tests** — a separate top-level module that boots multiple services
+      (gateway → patient → billing → Kafka) via docker-compose/Testcontainers and tests flows
+      across them. Introduce once a second service + gateway exist (per-service integration
+      tests already cover single-service e2e).
 - [ ] **Caching** (Redis) for read-heavy endpoints.
 
 ## Sources

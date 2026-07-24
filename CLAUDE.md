@@ -143,5 +143,7 @@ compilation problems` / `No qualifying bean of type PatientMapper` at startup). 
 - [x] Config (`application.properties` + `.env` via spring-dotenv), local MariaDB `patient_db`
 - [x] Flyway `V1__create_patients_table.sql` (native `UUID`, InnoDB)
 - [x] Booted & verified end-to-end (201/200/400/404/409, Swagger, DB persistence)
-- [ ] Tier 1 hardening (tests, `@Version`, auditing, soft-delete) — see ROADMAP.md
+- [x] Tests: unit (Mockito) + web slice (`@WebMvcTest`) + integration (Testcontainers MariaDB), 27 green
+- [x] Optimistic locking (`@Version`, Level 2)
+- [ ] Remaining Tier 1: auditing `BaseEntity`, soft-delete — see ROADMAP.md
 - [ ] remaining services + gateway
