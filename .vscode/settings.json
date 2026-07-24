@@ -1,3 +1,4 @@
 {
-  "xml.validation.schema.enabled": "never"
+  "xml.validation.schema.enabled": "never",
+  "java.autobuild.enabled": false
 }

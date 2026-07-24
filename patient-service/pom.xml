@@ -77,24 +77,12 @@
 			<version>${mapstruct.version}</version>
 		</dependency>
 
-		<!--
-			Processors declared as dependencies (not annotationProcessorPaths) so both
-			javac and the IDE's Eclipse compiler discover them from the classpath.
-			lombok-mapstruct-binding makes MapStruct wait for Lombok to run first, so
-			generated getters are visible to the mapper.
-		-->
-		<dependency>
-			<groupId>org.mapstruct</groupId>
-			<artifactId>mapstruct-processor</artifactId>
-			<version>${mapstruct.version}</version>
-			<scope>provided</scope>
-		</dependency>
-		<dependency>
-			<groupId>org.projectlombok</groupId>
-			<artifactId>lombok-mapstruct-binding</artifactId>
-			<version>${lombok-mapstruct-binding.version}</version>
-			<scope>provided</scope>
-		</dependency>
+		<!-- MapStruct + Lombok annotation processors are declared in the compiler plugin's
+		     annotationProcessorPaths (below), with explicit ordering. Running them as an ordered
+		     processor path — rather than loose provided-scope classpath deps — keeps javac's
+		     processing rounds deterministic; the loose form let Lombok stamp an
+		     "InconsistentHierarchy" attribute on the generated mapper that broke Spring's ASM
+		     component scan (the mapper bean silently vanished). -->
 
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
@@ -109,6 +97,34 @@
 				<groupId>org.apache.maven.plugins</groupId>
 				<artifactId>maven-compiler-plugin</artifactId>
 				<configuration>
+					<!--
+						Force full recompilation. With incremental compilation, an incremental
+						rebuild (e.g. triggered by spring-boot:run) deletes MapStruct's generated
+						PatientMapperImpl and doesn't regenerate it, so its Spring bean vanishes at
+						startup ("No qualifying bean of type PatientMapper"). Full recompile always
+						re-runs the annotation processors.
+					-->
+					<useIncrementalCompilation>false</useIncrementalCompilation>
+					<!-- Ordered processors: Lombok first (generates getters), then the binding,
+					     then MapStruct (reads those getters). Explicit ordering avoids the
+					     round-ordering bug that corrupted the generated mapper. -->
+					<annotationProcessorPaths>
+						<path>
+							<groupId>org.projectlombok</groupId>
+							<artifactId>lombok</artifactId>
+							<version>${lombok.version}</version>
+						</path>
+						<path>
+							<groupId>org.projectlombok</groupId>
+							<artifactId>lombok-mapstruct-binding</artifactId>
+							<version>${lombok-mapstruct-binding.version}</version>
+						</path>
+						<path>
+							<groupId>org.mapstruct</groupId>
+							<artifactId>mapstruct-processor</artifactId>
+							<version>${mapstruct.version}</version>
+						</path>
+					</annotationProcessorPaths>
 					<compilerArgs>
 						<!-- Generated mappers are Spring beans; fail the build on anything unmapped. -->
 						<arg>-Amapstruct.defaultComponentModel=spring</arg>

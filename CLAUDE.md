@@ -43,6 +43,7 @@ com.pm.<service>/
 ├── dto/          # request/response objects — the API contract, carries Bean Validation
 ├── mapper/       # entity <-> DTO conversion
 ├── controller/   # REST endpoints — HTTP concerns only
+├── config/       # Spring @Configuration beans (OpenAPI, etc.)
 └── exception/    # custom exceptions + @RestControllerAdvice global handler
 ```
 
