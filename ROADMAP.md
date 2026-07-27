@@ -30,9 +30,11 @@ Cheap, high-impact; every future service inherits the pattern.
 
 - [ ] **Metrics** — `micrometer-registry-prometheus` → `/actuator/prometheus`.
 - [ ] **Distributed tracing** — Micrometer Tracing + OpenTelemetry (OTLP), exported to Tempo.
-- [ ] **Structured JSON logging** + correlation/trace IDs (`logstash-logback-encoder`).
-- [ ] **K8s health probes** (liveness/readiness) + **graceful shutdown**
-      (`server.shutdown=graceful`).
+      Will replace the hand-rolled `requestId` with propagated trace/span ids.
+- [x] **Structured JSON logging** + correlation IDs — native Spring Boot structured logging
+      (ECS) in the prod profile; `CorrelationIdFilter` puts an `X-Request-Id` in the MDC. No
+      external logstash-encoder dependency needed (Boot 3.4+).
+- [x] **Health probes** (liveness/readiness) + **graceful shutdown** (`server.shutdown=graceful`).
 
 ## Tier 3 — platform concerns (as services multiply)
 

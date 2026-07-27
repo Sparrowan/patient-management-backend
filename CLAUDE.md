@@ -44,6 +44,7 @@ com.pm.<service>/
 ├── mapper/       # entity <-> DTO conversion
 ├── controller/   # REST endpoints — HTTP concerns only
 ├── config/       # Spring @Configuration beans (OpenAPI, etc.)
+├── web/          # servlet filters / cross-cutting web concerns (correlation id)
 └── exception/    # custom exceptions + @RestControllerAdvice global handler
 ```
 
@@ -111,10 +112,14 @@ com.pm.<service>/
   | `PUT /{id}` | 200 | 400, 404, 409 |
   | `DELETE /{id}` | 204 | 404 |
 
-- **Errors are centralized**: one `@RestControllerAdvice` maps domain exceptions
-  (`*NotFoundException` → 404, `*AlreadyExistsException` → 409, validation → 400) to RFC 7807
-  `ProblemDetail`. Services throw domain exceptions; they never return null/empty for "not
-  found".
+- **Errors are centralized**: one `@RestControllerAdvice` (extends
+  `ResponseEntityExceptionHandler` so framework errors are ProblemDetail too) maps domain
+  exceptions (`*NotFoundException` → 404, `*AlreadyExistsException` → 409, validation → 400) to
+  RFC 7807 `ProblemDetail`, with a logged catch-all → 500 that leaks no internals. Services throw
+  domain exceptions; they never return null/empty for "not found".
+- **Observability**: `CorrelationIdFilter` puts an `X-Request-Id` in the MDC per request (echoed
+  in the response header). Logs are native structured JSON (ECS) in the `docker`/prod profile,
+  plain console + `requestId` locally. Graceful shutdown + Actuator health probes are on.
 - **Request DTOs are validated**: `record` request DTOs carry Bean Validation
   (`@NotBlank`, `@Email`, ...); controllers annotate the body with `@Valid`.
 - **List endpoints are paginated**: accept `Pageable`; never return an unbounded `findAll()`

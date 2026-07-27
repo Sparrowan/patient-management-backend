@@ -2,21 +2,32 @@ package com.pm.patientservice.exception;
 
 import java.util.HashMap;
 import java.util.Map;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.mapping.PropertyReferenceException;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ProblemDetail;
+import org.springframework.http.ResponseEntity;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.context.request.WebRequest;
+import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
 
 /**
- * Translates domain and validation exceptions into RFC 7807 {@link ProblemDetail} responses,
- * so every error across the service has a consistent JSON shape. Controllers throw; they never
- * build error responses themselves.
+ * Translates domain, validation, and unexpected exceptions into RFC 7807 {@link ProblemDetail}
+ * responses so every error has a consistent JSON shape. Extends {@link
+ * ResponseEntityExceptionHandler} so Spring's own framework exceptions (malformed JSON, wrong
+ * method, unknown path, ...) also come back as ProblemDetail with the correct 4xx status rather
+ * than being swallowed by the catch-all as 500s.
  */
 @RestControllerAdvice
-public class GlobalExceptionHandler {
+public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
+
+    private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
     @ExceptionHandler(PatientNotFoundException.class)
     public ProblemDetail handlePatientNotFound(PatientNotFoundException ex) {
@@ -49,8 +60,24 @@ public class GlobalExceptionHandler {
         return problem;
     }
 
-    @ExceptionHandler(MethodArgumentNotValidException.class)
-    public ProblemDetail handleValidation(MethodArgumentNotValidException ex) {
+    /** Last resort: an unexpected exception is a bug/outage — log it (with the correlation id in
+     * MDC) and return a generic 500 that leaks no internals. */
+    @ExceptionHandler(Exception.class)
+    public ProblemDetail handleUnexpected(Exception ex) {
+        log.error("Unhandled exception", ex);
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.INTERNAL_SERVER_ERROR, "An unexpected error occurred. Please try again later.");
+        problem.setTitle("Internal server error");
+        return problem;
+    }
+
+    /** Override the framework's bean-validation handling to add a per-field {@code errors} map. */
+    @Override
+    protected ResponseEntity<Object> handleMethodArgumentNotValid(
+            MethodArgumentNotValidException ex,
+            HttpHeaders headers,
+            HttpStatusCode status,
+            WebRequest request) {
         ProblemDetail problem =
                 ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, "Request validation failed");
         problem.setTitle("Validation error");
@@ -60,6 +87,7 @@ public class GlobalExceptionHandler {
                 .getFieldErrors()
                 .forEach(error -> errors.put(error.getField(), error.getDefaultMessage()));
         problem.setProperty("errors", errors);
-        return problem;
+
+        return handleExceptionInternal(ex, problem, headers, HttpStatus.BAD_REQUEST, request);
     }
 }
