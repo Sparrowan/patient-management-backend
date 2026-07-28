@@ -45,8 +45,46 @@ services:
     networks:
       - patient-net
 
+  billing-service-db:
+    image: mariadb:11.7
+    container_name: billing-service-db
+    environment:
+      MARIADB_DATABASE: billing_db
+      MARIADB_USER: billing
+      MARIADB_PASSWORD: billing
+      MARIADB_ROOT_PASSWORD: root
+    volumes:
+      - billing-db-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - patient-net
+
+  billing-service:
+    build:
+      context: ./billing-service
+    image: patient-management/billing-service:latest
+    container_name: billing-service
+    depends_on:
+      billing-service-db:
+        condition: service_healthy
+    environment:
+      DB_URL: jdbc:mariadb://billing-service-db:3306/billing_db
+      DB_USERNAME: billing
+      DB_PASSWORD: billing
+      SPRING_PROFILES_ACTIVE: docker
+    ports:
+      - "4001:4001"
+    networks:
+      - patient-net
+
 volumes:
   patient-db-data:
+  billing-db-data:
 
 networks:
   patient-net:

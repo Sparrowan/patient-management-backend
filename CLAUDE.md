@@ -192,6 +192,8 @@ compilation problems` / `No qualifying bean of type PatientMapper` at startup). 
 - [x] `billing-service` scaffolded (Boot 3.5.16) + domain slice: `BillingAccount` (money as
       `DECIMAL(19,2)`), open/read endpoints, same conventions as patient-service, 13 tests green
 - [x] `billing-service` money movement: credit/debit + append-only ledger + `Idempotency-Key`
-      (unique-key replay), insufficient-funds → 422, money never rounded (`@Digits`), 34 tests
+      (unique-key replay), insufficient-funds → 422, money never rounded (`@Digits`), 30 tests
+- [x] `billing-service` dockerized (multi-stage image + `billing-service-db` in root compose);
+      both services + their DBs come up with `docker compose up --build`. 60 tests green total.
 - [ ] Next: gRPC `patient → billing` (open account on patient registration)
 - [ ] remaining services + gateway
