@@ -1,6 +1,8 @@
 package com.pm.billingservice.service;
 
 import com.pm.billingservice.dto.BillingAccountResponseDTO;
+import com.pm.billingservice.dto.LedgerEntryResponseDTO;
+import com.pm.billingservice.dto.MoneyMovementRequestDTO;
 import com.pm.billingservice.dto.OpenAccountRequestDTO;
 import com.pm.billingservice.dto.PagedResponse;
 import java.util.UUID;
@@ -9,28 +11,33 @@ import org.springframework.data.domain.Pageable;
 /** Business operations for billing accounts. Controllers depend on this abstraction (DIP). */
 public interface BillingAccountService {
 
-    /** Returns a page of billing accounts. */
     PagedResponse<BillingAccountResponseDTO> getAccounts(Pageable pageable);
 
-    /**
-     * Returns a single account.
-     *
-     * @throws com.pm.billingservice.exception.BillingAccountNotFoundException if none exists
-     */
+    /** @throws com.pm.billingservice.exception.BillingAccountNotFoundException if none exists */
     BillingAccountResponseDTO getAccount(UUID id);
 
+    /** @throws com.pm.billingservice.exception.BillingAccountNotFoundException if none exists */
+    BillingAccountResponseDTO getAccountByPatient(UUID patientId);
+
+    /** @throws com.pm.billingservice.exception.AccountAlreadyExistsException if the patient has one */
+    BillingAccountResponseDTO openAccount(OpenAccountRequestDTO request);
+
     /**
-     * Returns the account for a patient.
+     * Adds funds. Idempotent on {@code idempotencyKey}: a retried key returns the original result
+     * without re-applying.
      *
      * @throws com.pm.billingservice.exception.BillingAccountNotFoundException if none exists
      */
-    BillingAccountResponseDTO getAccountByPatient(UUID patientId);
+    LedgerEntryResponseDTO credit(UUID accountId, MoneyMovementRequestDTO request, String idempotencyKey);
 
     /**
-     * Opens a new billing account for a patient.
+     * Removes funds. Idempotent on {@code idempotencyKey}.
      *
-     * @throws com.pm.billingservice.exception.AccountAlreadyExistsException if the patient already
-     *     has one
+     * @throws com.pm.billingservice.exception.BillingAccountNotFoundException if none exists
+     * @throws com.pm.billingservice.exception.InsufficientFundsException if the balance is too low
      */
-    BillingAccountResponseDTO openAccount(OpenAccountRequestDTO request);
+    LedgerEntryResponseDTO debit(UUID accountId, MoneyMovementRequestDTO request, String idempotencyKey);
+
+    /** Returns the account's ledger (money-movement history), newest first. */
+    PagedResponse<LedgerEntryResponseDTO> getLedger(UUID accountId, Pageable pageable);
 }

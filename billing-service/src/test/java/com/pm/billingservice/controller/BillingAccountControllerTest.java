@@ -1,6 +1,7 @@
 package com.pm.billingservice.controller;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -8,10 +9,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.pm.billingservice.dto.BillingAccountResponseDTO;
+import com.pm.billingservice.dto.LedgerEntryResponseDTO;
 import com.pm.billingservice.dto.PagedResponse;
 import com.pm.billingservice.exception.AccountAlreadyExistsException;
 import com.pm.billingservice.exception.BillingAccountNotFoundException;
+import com.pm.billingservice.exception.InsufficientFundsException;
 import com.pm.billingservice.model.AccountStatus;
+import com.pm.billingservice.model.EntryType;
 import com.pm.billingservice.service.BillingAccountService;
 import java.math.BigDecimal;
 import java.util.List;
@@ -38,6 +42,12 @@ class BillingAccountControllerTest {
     private BillingAccountResponseDTO response() {
         return new BillingAccountResponseDTO(
                 ACCOUNT_ID, PATIENT_ID, AccountStatus.ACTIVE, new BigDecimal("0.00"), "USD", 0L);
+    }
+
+    private LedgerEntryResponseDTO ledgerResponse() {
+        return new LedgerEntryResponseDTO(
+                UUID.fromString("33333333-3333-3333-3333-333333333333"), ACCOUNT_ID, EntryType.CREDIT,
+                new BigDecimal("50.00"), new BigDecimal("50.00"), null, "k1", null);
     }
 
     @Test
@@ -109,5 +119,41 @@ class BillingAccountControllerTest {
         mockMvc.perform(post("/api/v1/billing-accounts").contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.title").value("Account already exists"));
+    }
+
+    @Test
+    @DisplayName("POST /credit with an Idempotency-Key returns 200")
+    void creditReturns200() throws Exception {
+        when(accountService.credit(eq(ACCOUNT_ID), any(), eq("k1"))).thenReturn(ledgerResponse());
+
+        mockMvc.perform(post("/api/v1/billing-accounts/{id}/credit", ACCOUNT_ID)
+                        .header("Idempotency-Key", "k1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"amount\":50.00}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.balanceAfter").value(50.00));
+    }
+
+    @Test
+    @DisplayName("POST /credit without an Idempotency-Key returns 400")
+    void creditMissingKeyReturns400() throws Exception {
+        mockMvc.perform(post("/api/v1/billing-accounts/{id}/credit", ACCOUNT_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"amount\":50.00}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("POST /debit with insufficient funds returns 422")
+    void debitReturns422() throws Exception {
+        when(accountService.debit(eq(ACCOUNT_ID), any(), eq("k1")))
+                .thenThrow(new InsufficientFundsException(ACCOUNT_ID, new BigDecimal("0.00"), new BigDecimal("50.00")));
+
+        mockMvc.perform(post("/api/v1/billing-accounts/{id}/debit", ACCOUNT_ID)
+                        .header("Idempotency-Key", "k1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"amount\":50.00}"))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.title").value("Insufficient funds"));
     }
 }

@@ -7,6 +7,7 @@ import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import com.pm.billingservice.exception.InsufficientFundsException;
 import jakarta.persistence.Table;
 import java.math.BigDecimal;
 import java.util.UUID;
@@ -60,5 +61,26 @@ public class BillingAccount extends BaseEntity {
     /** Opens a new active account for a patient with a zero balance in the given currency. */
     public static BillingAccount openFor(UUID patientId, String currency) {
         return new BillingAccount(patientId, currency);
+    }
+
+    /** Adds funds to the balance. Amount must be positive. */
+    public void credit(BigDecimal amount) {
+        this.balance = this.balance.add(requirePositive(amount));
+    }
+
+    /** Removes funds from the balance. Fails if the balance would go negative. */
+    public void debit(BigDecimal amount) {
+        requirePositive(amount);
+        if (this.balance.compareTo(amount) < 0) {
+            throw new InsufficientFundsException(this.id, this.balance, amount);
+        }
+        this.balance = this.balance.subtract(amount);
+    }
+
+    private static BigDecimal requirePositive(BigDecimal amount) {
+        if (amount == null || amount.signum() <= 0) {
+            throw new IllegalArgumentException("Amount must be positive: " + amount);
+        }
+        return amount;
     }
 }

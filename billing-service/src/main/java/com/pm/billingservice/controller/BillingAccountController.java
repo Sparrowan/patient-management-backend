@@ -1,6 +1,8 @@
 package com.pm.billingservice.controller;
 
 import com.pm.billingservice.dto.BillingAccountResponseDTO;
+import com.pm.billingservice.dto.LedgerEntryResponseDTO;
+import com.pm.billingservice.dto.MoneyMovementRequestDTO;
 import com.pm.billingservice.dto.OpenAccountRequestDTO;
 import com.pm.billingservice.dto.PagedResponse;
 import com.pm.billingservice.service.BillingAccountService;
@@ -19,6 +21,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
@@ -65,5 +68,44 @@ public class BillingAccountController {
     @ResponseStatus(HttpStatus.CREATED)
     public BillingAccountResponseDTO openAccount(@Valid @RequestBody OpenAccountRequestDTO request) {
         return accountService.openAccount(request);
+    }
+
+    @Operation(
+            summary = "Credit an account",
+            description = "Adds funds. Requires an Idempotency-Key header; a retried key returns the original result.")
+    @ApiResponse(responseCode = "200", description = "Applied (or replayed)")
+    @ApiResponse(responseCode = "400", description = "Validation failed / missing Idempotency-Key")
+    @ApiResponse(responseCode = "404", description = "No such account")
+    @PostMapping("/{id}/credit")
+    public LedgerEntryResponseDTO credit(
+            @PathVariable UUID id,
+            @Valid @RequestBody MoneyMovementRequestDTO request,
+            @RequestHeader("Idempotency-Key") String idempotencyKey) {
+        return accountService.credit(id, request, idempotencyKey);
+    }
+
+    @Operation(
+            summary = "Debit an account",
+            description = "Removes funds. Requires an Idempotency-Key header. Fails with 422 if funds are insufficient.")
+    @ApiResponse(responseCode = "200", description = "Applied (or replayed)")
+    @ApiResponse(responseCode = "400", description = "Validation failed / missing Idempotency-Key")
+    @ApiResponse(responseCode = "404", description = "No such account")
+    @ApiResponse(responseCode = "422", description = "Insufficient funds")
+    @PostMapping("/{id}/debit")
+    public LedgerEntryResponseDTO debit(
+            @PathVariable UUID id,
+            @Valid @RequestBody MoneyMovementRequestDTO request,
+            @RequestHeader("Idempotency-Key") String idempotencyKey) {
+        return accountService.debit(id, request, idempotencyKey);
+    }
+
+    @Operation(summary = "List an account's ledger (money-movement history)")
+    @ApiResponse(responseCode = "404", description = "No such account")
+    @GetMapping("/{id}/ledger")
+    public PagedResponse<LedgerEntryResponseDTO> getLedger(
+            @PathVariable UUID id,
+            @ParameterObject @PageableDefault(size = 20, sort = "createdAt", direction = Sort.Direction.DESC)
+                    Pageable pageable) {
+        return accountService.getLedger(id, pageable);
     }
 }

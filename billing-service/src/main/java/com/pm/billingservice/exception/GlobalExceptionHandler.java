@@ -42,6 +42,14 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         return problem;
     }
 
+    @ExceptionHandler(InsufficientFundsException.class)
+    public ProblemDetail handleInsufficientFunds(InsufficientFundsException ex) {
+        ProblemDetail problem =
+                ProblemDetail.forStatusAndDetail(HttpStatus.UNPROCESSABLE_ENTITY, ex.getMessage());
+        problem.setTitle("Insufficient funds");
+        return problem;
+    }
+
     @ExceptionHandler(ObjectOptimisticLockingFailureException.class)
     public ProblemDetail handleOptimisticLock(ObjectOptimisticLockingFailureException ex) {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(

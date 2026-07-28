@@ -1,13 +1,20 @@
 package com.pm.billingservice.service;
 
 import com.pm.billingservice.dto.BillingAccountResponseDTO;
+import com.pm.billingservice.dto.LedgerEntryResponseDTO;
+import com.pm.billingservice.dto.MoneyMovementRequestDTO;
 import com.pm.billingservice.dto.OpenAccountRequestDTO;
 import com.pm.billingservice.dto.PagedResponse;
 import com.pm.billingservice.exception.AccountAlreadyExistsException;
 import com.pm.billingservice.exception.BillingAccountNotFoundException;
 import com.pm.billingservice.mapper.BillingAccountMapper;
+import com.pm.billingservice.mapper.LedgerEntryMapper;
 import com.pm.billingservice.model.BillingAccount;
+import com.pm.billingservice.model.EntryType;
+import com.pm.billingservice.model.LedgerEntry;
 import com.pm.billingservice.repository.BillingAccountRepository;
+import com.pm.billingservice.repository.LedgerEntryRepository;
+import java.util.Optional;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Pageable;
@@ -19,7 +26,9 @@ import org.springframework.transaction.annotation.Transactional;
 public class BillingAccountServiceImpl implements BillingAccountService {
 
     private final BillingAccountRepository accountRepository;
+    private final LedgerEntryRepository ledgerRepository;
     private final BillingAccountMapper accountMapper;
+    private final LedgerEntryMapper ledgerMapper;
 
     @Override
     @Transactional(readOnly = true)
@@ -30,8 +39,7 @@ public class BillingAccountServiceImpl implements BillingAccountService {
     @Override
     @Transactional(readOnly = true)
     public BillingAccountResponseDTO getAccount(UUID id) {
-        return accountMapper.toResponse(
-                accountRepository.findById(id).orElseThrow(() -> new BillingAccountNotFoundException(id)));
+        return accountMapper.toResponse(findAccountOrThrow(id));
     }
 
     @Override
@@ -50,5 +58,59 @@ public class BillingAccountServiceImpl implements BillingAccountService {
         }
         BillingAccount account = BillingAccount.openFor(request.patientId(), request.currency());
         return accountMapper.toResponse(accountRepository.save(account));
+    }
+
+    @Override
+    @Transactional
+    public LedgerEntryResponseDTO credit(
+            UUID accountId, MoneyMovementRequestDTO request, String idempotencyKey) {
+        return applyMovement(accountId, request, idempotencyKey, EntryType.CREDIT);
+    }
+
+    @Override
+    @Transactional
+    public LedgerEntryResponseDTO debit(
+            UUID accountId, MoneyMovementRequestDTO request, String idempotencyKey) {
+        return applyMovement(accountId, request, idempotencyKey, EntryType.DEBIT);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public PagedResponse<LedgerEntryResponseDTO> getLedger(UUID accountId, Pageable pageable) {
+        if (!accountRepository.existsById(accountId)) {
+            throw new BillingAccountNotFoundException(accountId);
+        }
+        return PagedResponse.from(
+                ledgerRepository.findByAccountId(accountId, pageable).map(ledgerMapper::toResponse));
+    }
+
+    /**
+     * Applies a credit or debit atomically: the account balance and the ledger entry are written
+     * in the same transaction. Idempotent on the key — a retried request returns the original
+     * entry (whose {@code balanceAfter} is stable) without re-applying; the unique key column is
+     * the hard guarantee against double-applying concurrent retries.
+     */
+    private LedgerEntryResponseDTO applyMovement(
+            UUID accountId, MoneyMovementRequestDTO request, String idempotencyKey, EntryType type) {
+        Optional<LedgerEntry> replay = ledgerRepository.findByIdempotencyKey(idempotencyKey);
+        if (replay.isPresent()) {
+            return ledgerMapper.toResponse(replay.get());
+        }
+
+        BillingAccount account = findAccountOrThrow(accountId);
+        if (type == EntryType.CREDIT) {
+            account.credit(request.amount());
+        } else {
+            account.debit(request.amount());
+        }
+        accountRepository.save(account);
+
+        LedgerEntry entry = ledgerRepository.save(LedgerEntry.record(
+                accountId, type, request.amount(), account.getBalance(), idempotencyKey, request.description()));
+        return ledgerMapper.toResponse(entry);
+    }
+
+    private BillingAccount findAccountOrThrow(UUID id) {
+        return accountRepository.findById(id).orElseThrow(() -> new BillingAccountNotFoundException(id));
     }
 }
