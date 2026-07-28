@@ -25,8 +25,8 @@ cross-reference the backend-patterns catalog we're prioritizing for banking/fint
 - [x] **API versioning** — paths are under `/api/v1/...`. `[#62]`
 - [x] **ETag / conditional requests** — `GET /{id}` returns `@Version` as the ETag; `If-None-Match`
       → 304. (Writes use body-version optimistic locking, not `If-Match`.) `[#44/#45]`
-- [ ] **Idempotency-Key on `POST`** — dedupe retried creates. Deferred to `billing-service` where
-      it's critical (money), then backport. `[#1]`
+- [x] **Idempotency-Key** — done in `billing-service` credit/debit (required header, unique-key
+      replay, never double-applies). Backport to patient `POST` if needed. `[#1]`
 
 ## Tier 2 — observability & ops (before traffic grows)
 
@@ -69,7 +69,8 @@ cross-reference the backend-patterns catalog we're prioritizing for banking/fint
 
 - [ ] **Kafka** + **Outbox pattern** + **idempotent consumers** + **DLQ**. `[#55/#52]`
 - [ ] **Saga pattern** for cross-service transactions (transfer = debit + credit). `[#56]`
-- [ ] **Immutable ledger / event sourcing** for billing (append-only, double-entry). `[#53]`
+- [x] **Immutable ledger** for billing — append-only `ledger_entries` (each money movement with
+      `balanceAfter`); full event-sourcing/double-entry is a later evolution. `[#53]`
 - [ ] **CDC streaming** for reconciliation/reporting. `[#99]`
 
 ### Security (regulated domain — PHI / financial)
@@ -87,8 +88,8 @@ platform/compliance teams own it, but design compatibly and be able to speak to 
 
 ### Financial correctness (mostly `billing-service`)
 
-- [ ] **Money as `BigDecimal` / integer minor-units — never `double`/`float`**, with explicit
-      rounding mode + currency on every amount. `[code]`
+- [x] **Money as `BigDecimal` — never `double`/`float`** — `billing-service` balance is
+      `DECIMAL(19,2)` with a currency. Explicit rounding modes land with credit/debit. `[code]`
 - [ ] **Double-entry / balanced ledger** — every debit has a matching credit. `[code]`
 - [ ] **Reconciliation** jobs (end-of-day, vs external systems) + **FX / multi-currency**. `[code]`
 - [ ] **Transaction limits & velocity checks** (fraud/AML gating). `[code]`
