@@ -68,6 +68,14 @@ com.pm.<service>/
   client's `version` and responses expose it. The service rejects a stale version with
   `ObjectOptimisticLockingFailureException` → 409. Use `saveAndFlush` on update so the response
   returns the *incremented* version (plain `save` flushes at commit, after mapping).
+- **Locking**: optimistic (`@Version`) is the default everywhere. **Money-movement paths take a
+  pessimistic write lock** (`@Lock(PESSIMISTIC_WRITE)` → `SELECT ... FOR UPDATE`) on the account
+  so concurrent credits/debits serialize instead of 409-ing on the version check.
+- **Relationships & N+1**: prefer **ID references** (a `UUID` field + DB FK) over JPA associations
+  across aggregates — no lazy navigation, no N+1 (e.g. `LedgerEntry.accountId`, not
+  `@ManyToOne`). Where an association *is* modeled, keep it `LAZY` (override `@ManyToOne`'s EAGER
+  default) and fetch on demand with `@EntityGraph`/`JOIN FETCH` — **never `EAGER`**.
+  `open-in-view=false` everywhere.
 - **`BaseEntity` mapped superclass** carries the cross-cutting persistence fields: `@CreatedDate`
   `createdAt` / `@LastModifiedDate` `updatedAt` (via `@EnableJpaAuditing`) + `@Version`. Every
   entity extends it. `createdBy`/`updatedBy` come once an `AuditorAware` (auth) exists.

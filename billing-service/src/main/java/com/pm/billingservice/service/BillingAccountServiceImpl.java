@@ -97,7 +97,11 @@ public class BillingAccountServiceImpl implements BillingAccountService {
             return ledgerMapper.toResponse(replay.get());
         }
 
-        BillingAccount account = findAccountOrThrow(accountId);
+        // Pessimistic write lock: concurrent movements on this account serialize here rather
+        // than racing on the balance and 409-ing via the optimistic @Version check.
+        BillingAccount account = accountRepository
+                .findByIdForUpdate(accountId)
+                .orElseThrow(() -> new BillingAccountNotFoundException(accountId));
         if (type == EntryType.CREDIT) {
             account.credit(request.amount());
         } else {

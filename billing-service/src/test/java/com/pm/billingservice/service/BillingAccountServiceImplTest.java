@@ -148,7 +148,7 @@ class BillingAccountServiceImplTest {
         void creditApplies() {
             BillingAccount account = account();
             when(ledgerRepository.findByIdempotencyKey("k1")).thenReturn(Optional.empty());
-            when(accountRepository.findById(ACCOUNT_ID)).thenReturn(Optional.of(account));
+            when(accountRepository.findByIdForUpdate(ACCOUNT_ID)).thenReturn(Optional.of(account));
             when(ledgerRepository.save(any(LedgerEntry.class))).thenAnswer(inv -> inv.getArgument(0));
             when(ledgerMapper.toResponse(any(LedgerEntry.class))).thenReturn(ledgerResponse());
 
@@ -169,7 +169,7 @@ class BillingAccountServiceImplTest {
                     service.credit(ACCOUNT_ID, new MoneyMovementRequestDTO(new BigDecimal("50.00"), null), "k1");
 
             assertThat(result).isEqualTo(ledgerResponse());
-            verify(accountRepository, never()).findById(any());
+            verify(accountRepository, never()).findByIdForUpdate(any());
             verify(accountRepository, never()).save(any());
             verify(ledgerRepository, never()).save(any());
         }
@@ -180,7 +180,7 @@ class BillingAccountServiceImplTest {
             BillingAccount account = account();
             account.credit(new BigDecimal("100.00"));
             when(ledgerRepository.findByIdempotencyKey("k2")).thenReturn(Optional.empty());
-            when(accountRepository.findById(ACCOUNT_ID)).thenReturn(Optional.of(account));
+            when(accountRepository.findByIdForUpdate(ACCOUNT_ID)).thenReturn(Optional.of(account));
             when(ledgerRepository.save(any(LedgerEntry.class))).thenAnswer(inv -> inv.getArgument(0));
             when(ledgerMapper.toResponse(any(LedgerEntry.class))).thenReturn(ledgerResponse());
 
@@ -194,7 +194,7 @@ class BillingAccountServiceImplTest {
         void debitInsufficient() {
             BillingAccount account = account(); // balance 0.00
             when(ledgerRepository.findByIdempotencyKey("k3")).thenReturn(Optional.empty());
-            when(accountRepository.findById(ACCOUNT_ID)).thenReturn(Optional.of(account));
+            when(accountRepository.findByIdForUpdate(ACCOUNT_ID)).thenReturn(Optional.of(account));
 
             assertThatThrownBy(() -> service.debit(
                             ACCOUNT_ID, new MoneyMovementRequestDTO(new BigDecimal("10.00"), null), "k3"))
