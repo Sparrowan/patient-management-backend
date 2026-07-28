@@ -1,59 +1,120 @@
 # Roadmap — hardening for scale
 
-> **This is a backlog of *planned* work, not current conventions.** Nothing here is
-> implemented yet. When an item is built, its rule graduates into [`CLAUDE.md`](CLAUDE.md) and
-> the item is checked off here. Keeping the two separate keeps CLAUDE.md 100% true about what
-> the code actually does.
+> **This is a backlog of *planned* work, not current conventions.** When an item is built, its
+> rule graduates into [`CLAUDE.md`](CLAUDE.md) and the item is checked off here. Keeping the two
+> separate keeps CLAUDE.md 100% true about what the code actually does.
 
 Goal: a foundation fit for a platform used by millions — resilient, observable, and secure by
-default. Grounded in current (2026) Spring Boot microservices best practice (see sources at
-bottom).
+default. The domain is **regulated** (patient PHI today, financial-grade for `billing-service`),
+so **auditability, correctness, and security are first-class**, not afterthoughts. `[#n]` tags
+cross-reference the backend-patterns catalog we're prioritizing for banking/fintech readiness.
 
-## Tier 1 — strengthen `patient-service` (the reference service)
-
-Cheap, high-impact; every future service inherits the pattern.
+## Tier 1 — strengthen `patient-service` (cheap, high-impact; every service inherits it)
 
 - [x] **Automated tests** — unit (Mockito) + web slice (`@WebMvcTest`) + integration
-      (Testcontainers, real MariaDB). 27 tests green for `patient-service`. Integration base uses
-      the singleton-container pattern (start once in a static block; `@DynamicPropertySource`).
-- [x] **Optimistic locking** — `@Version` + client-supplied version on update, stale → 409
-      (Level 2 optimistic concurrency control). Done for `patient-service`.
-- [ ] **JPA auditing** — `createdAt` / `updatedAt` via a shared `BaseEntity`
-      (`@EntityListeners(AuditingEntityListener.class)`). Mirror the `store` project's `BaseEntity`.
-- [ ] **Soft delete** — patients (medical records) should not be hard-deleted; regulatory.
-      Mirror `store`'s `SoftDeletableEntity`.
-- [ ] **DB indexing** — index frequently queried columns beyond the unique `email`.
+      (Testcontainers, real MariaDB). 27 green. Singleton-container base pattern.
+- [x] **Optimistic locking** — `@Version` + client version on update, stale → 409 (Level 2). `[#79]`
+- [ ] **JPA auditing** — `createdAt`/`updatedAt` (+ later `who`) via a shared `BaseEntity`
+      (`@EntityListeners(AuditingEntityListener.class)`). Regulated domains require an audit trail.
+- [ ] **Soft delete** — never hard-delete regulated records; mirror `store`'s `SoftDeletableEntity`.
+- [ ] **DB indexing** — composite indexes + leftmost-prefix rule as query patterns emerge. `[#13/#16]`
+- [ ] **API versioning** — `/api/v1/...` URL path; decide before there are consumers. `[#62]`
+- [ ] **ETag / conditional requests** — reuse the existing `@Version` as the ETag
+      (`If-Match`/`If-None-Match`). `[#44/#45]`
+- [ ] **Idempotency-Key on `POST`** — dedupe retried creates (lightweight here; full engine in
+      `billing-service`). `[#1]`
 
 ## Tier 2 — observability & ops (before traffic grows)
 
-*"Introduce observability before traffic grows."*
-
 - [ ] **Metrics** — `micrometer-registry-prometheus` → `/actuator/prometheus`.
-- [ ] **Distributed tracing** — Micrometer Tracing + OpenTelemetry (OTLP), exported to Tempo.
-      Will replace the hand-rolled `requestId` with propagated trace/span ids.
-- [x] **Structured JSON logging** + correlation IDs — native Spring Boot structured logging
-      (ECS) in the prod profile; `CorrelationIdFilter` puts an `X-Request-Id` in the MDC. No
-      external logstash-encoder dependency needed (Boot 3.4+).
-- [x] **Health probes** (liveness/readiness) + **graceful shutdown** (`server.shutdown=graceful`).
+- [ ] **Distributed tracing** — Micrometer Tracing + OpenTelemetry (OTLP) → Tempo; replaces the
+      hand-rolled `requestId` with propagated trace/span ids. `[#61]`
+- [x] **Structured JSON logging** + correlation IDs — native Boot structured logging (ECS) in prod;
+      `CorrelationIdFilter` → `X-Request-Id` in MDC. `[#59/#61]`
+- [x] **Health probes** (liveness/readiness) + **graceful shutdown**. `[#65/#66]`
+- [ ] **Log aggregation** — ship JSON logs to Loki/ELK, centrally indexed. `[#60]`
 
 ## Tier 3 — platform concerns (as services multiply)
 
+### Resilience
+
 - [ ] **Resilience4j** on inter-service calls — Circuit Breaker + Retry + TimeLimiter + Bulkhead
-      (e.g. `patient → billing`).
-- [ ] **API Gateway** (Spring Cloud Gateway) + **rate limiting** at the edge.
+      (`patient → billing`). `[#7/#11/#12]`
+- [ ] **Rate limiting** (token bucket) at the gateway + **load shedding**. `[#2/#8]`
+
+### Platform
+
+- [ ] **API Gateway** (Spring Cloud Gateway).
 - [ ] **Config Server** + **Service Discovery** (or K8s-native).
-- [ ] **Event-driven with Kafka** + **Outbox pattern** + **idempotent consumers** + **DLQ**.
-- [ ] **Idempotency keys** on `POST` to dedupe retried creates.
-- [ ] **Security** — `auth-service`, JWT / OAuth2 resource server, secrets in Vault, mTLS.
-- [x] **Containerization** — per-service multi-stage `Dockerfile` (non-root, healthcheck) +
-      root `docker-compose.yml` (per-service DB container). Done for `patient-service`.
-- [ ] **CI/CD** + **K8s manifests / Helm**.
-- [ ] **Contract testing** (Spring Cloud Contract) between services.
-- [ ] **Platform e2e tests** — a separate top-level module that boots multiple services
-      (gateway → patient → billing → Kafka) via docker-compose/Testcontainers and tests flows
-      across them. Introduce once a second service + gateway exist (per-service integration
-      tests already cover single-service e2e).
-- [ ] **Caching** (Redis) for read-heavy endpoints.
+- [x] **Containerization** — per-service multi-stage `Dockerfile` (non-root, healthcheck) + root
+      `docker-compose.yml` (per-service DB). Done for `patient-service`.
+- [ ] **CI/CD** + **K8s manifests/Helm**; blue-green / canary rollout. `[#91/#92]`
+- [ ] **Contract testing** (Spring Cloud Contract) between services. `[#94]`
+- [ ] **Platform e2e tests** — separate module booting gateway → patient → billing → Kafka.
+      Introduce once a second service + gateway exist.
+
+### Data & scale
+
+- [ ] **Keyset (cursor) pagination** for large history endpoints (offset is fine for now). `[#24]`
+- [ ] **Read/write splitting** across replicas. `[#20]`
+- [ ] **Caching** (Redis) — cache-aside for read-heavy endpoints. `[#38]`
+- [ ] **CQRS read models** for reporting/statements. `[#54]`
+- [ ] **Distributed locks** (Redlock/ZooKeeper) for singleton scheduled jobs (e.g. interest accrual). `[#90]`
+
+### Event-driven & money (mostly `billing-service`)
+
+- [ ] **Kafka** + **Outbox pattern** + **idempotent consumers** + **DLQ**. `[#55/#52]`
+- [ ] **Saga pattern** for cross-service transactions (transfer = debit + credit). `[#56]`
+- [ ] **Immutable ledger / event sourcing** for billing (append-only, double-entry). `[#53]`
+- [ ] **CDC streaming** for reconciliation/reporting. `[#99]`
+
+### Security (regulated domain — PHI / financial)
+
+- [ ] **`auth-service`** — JWT / OAuth2 resource server; **RBAC/ABAC** least privilege. `[#27/#28/#29]`
+- [ ] **mTLS** between services + **TLS 1.3** at the edge. `[#33]`
+- [ ] **Secrets management** (Vault) — no committed secrets.
+- [ ] **Field-level encryption at rest** for PII/PHI (email, DOB, address). `[#34]`
+- [ ] **HMAC request signing** for partner/webhook APIs. `[#97]`
+
+## Tier 4 — bank-grade: financial correctness, compliance & operations
+
+The layer *above* backend patterns. `[code]` = a senior engineer owns it in-service; `[org]` =
+platform/compliance teams own it, but design compatibly and be able to speak to it.
+
+### Financial correctness (mostly `billing-service`)
+
+- [ ] **Money as `BigDecimal` / integer minor-units — never `double`/`float`**, with explicit
+      rounding mode + currency on every amount. `[code]`
+- [ ] **Double-entry / balanced ledger** — every debit has a matching credit. `[code]`
+- [ ] **Reconciliation** jobs (end-of-day, vs external systems) + **FX / multi-currency**. `[code]`
+- [ ] **Transaction limits & velocity checks** (fraud/AML gating). `[code]`
+
+### Compliance & data governance
+
+- [ ] **Immutable audit trail of *who* did *what*** — beyond `createdAt`/`updatedAt`. `[code]`
+- [ ] **Log redaction / PII-PHI masking** — never log PANs, passwords, PHI. Near-term: we now
+      emit logs, so guarantee sensitive fields never reach them. `[code]`
+- [ ] **Data retention & right-to-erasure** (GDPR/DPA) via tokenization / crypto-shredding. `[code/org]`
+- [ ] **KYC/AML hooks, consent management, regulatory reporting**. `[org]`
+
+### Security depth
+
+- [ ] **KMS/HSM key management** + **secrets rotation** (not just Vault storage). `[org]`
+- [ ] **Tokenization** of sensitive data (PAN/account). `[code/org]`
+- [ ] **Fraud/anomaly detection**, **MFA**, **DDoS protection** (above app rate limiting). `[org]`
+
+### Operational maturity / reliability
+
+- [ ] **Zero-downtime expand/contract migrations** — Flyway changes stay backward-compatible so
+      rolling deploys never break. Adopt now while migrations are simple. `[code]`
+- [ ] **Load / performance testing** + **chaos testing**. `[code/org]`
+- [ ] **DR (RTO/RPO), multi-region HA, backups + point-in-time recovery**. `[org]`
+- [ ] **SLO/SLA + error budgets, runbooks, on-call**. `[org]`
+
+### Integration governance
+
+- [ ] **Webhook delivery with retries + signing**, **API deprecation policy**, **per-client/tenant
+      SLAs**, **sandbox environments**. `[code/org]`
 
 ## Sources
 
