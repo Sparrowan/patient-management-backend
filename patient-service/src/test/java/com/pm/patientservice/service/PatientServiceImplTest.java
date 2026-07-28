@@ -200,23 +200,27 @@ class PatientServiceImplTest {
     class DeletePatient {
 
         @Test
-        @DisplayName("deletes when the patient exists")
+        @DisplayName("soft-deletes (marks deleted + stamps deletedAt) when the patient exists")
         void deletesWhenPresent() {
-            when(patientRepository.existsById(ID)).thenReturn(true);
+            Patient patient = existingPatient();
+            when(patientRepository.findById(ID)).thenReturn(Optional.of(patient));
+            when(patientRepository.save(patient)).thenReturn(patient);
 
             patientService.deletePatient(ID);
 
-            verify(patientRepository).deleteById(ID);
+            assertThat(patient.isDeleted()).isTrue();
+            assertThat(patient.getDeletedAt()).isNotNull();
+            verify(patientRepository).save(patient);
         }
 
         @Test
-        @DisplayName("throws PatientNotFoundException and never deletes when absent")
+        @DisplayName("throws PatientNotFoundException and never saves when absent")
         void throwsWhenMissing() {
-            when(patientRepository.existsById(ID)).thenReturn(false);
+            when(patientRepository.findById(ID)).thenReturn(Optional.empty());
 
             assertThatThrownBy(() -> patientService.deletePatient(ID))
                     .isInstanceOf(PatientNotFoundException.class);
-            verify(patientRepository, never()).deleteById(any());
+            verify(patientRepository, never()).save(any());
         }
     }
 }

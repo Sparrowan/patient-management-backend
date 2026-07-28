@@ -68,10 +68,10 @@ public class PatientServiceImpl implements PatientService {
     @Override
     @Transactional
     public void deletePatient(UUID id) {
-        if (!patientRepository.existsById(id)) {
-            throw new PatientNotFoundException(id);
-        }
-        patientRepository.deleteById(id);
+        // Soft delete: load (already-deleted rows are filtered out → 404), mark, and persist.
+        Patient patient = findByIdOrThrow(id);
+        patient.markDeleted();
+        patientRepository.save(patient);
     }
 
     private Patient findByIdOrThrow(UUID id) {

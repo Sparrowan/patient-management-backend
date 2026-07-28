@@ -14,15 +14,19 @@ cross-reference the backend-patterns catalog we're prioritizing for banking/fint
 - [x] **Automated tests** — unit (Mockito) + web slice (`@WebMvcTest`) + integration
       (Testcontainers, real MariaDB). 27 green. Singleton-container base pattern.
 - [x] **Optimistic locking** — `@Version` + client version on update, stale → 409 (Level 2). `[#79]`
-- [ ] **JPA auditing** — `createdAt`/`updatedAt` (+ later `who`) via a shared `BaseEntity`
-      (`@EntityListeners(AuditingEntityListener.class)`). Regulated domains require an audit trail.
-- [ ] **Soft delete** — never hard-delete regulated records; mirror `store`'s `SoftDeletableEntity`.
-- [ ] **DB indexing** — composite indexes + leftmost-prefix rule as query patterns emerge. `[#13/#16]`
-- [ ] **API versioning** — `/api/v1/...` URL path; decide before there are consumers. `[#62]`
-- [ ] **ETag / conditional requests** — reuse the existing `@Version` as the ETag
-      (`If-Match`/`If-None-Match`). `[#44/#45]`
-- [ ] **Idempotency-Key on `POST`** — dedupe retried creates (lightweight here; full engine in
-      `billing-service`). `[#1]`
+- [x] **JPA auditing** — `createdAt`/`updatedAt` via a shared `BaseEntity` + `@EnableJpaAuditing`.
+      (`createdBy`/`updatedBy` pending auth.) Regulated domains require an audit trail.
+- [x] **Soft delete** — single nullable `deletedAt` (no boolean flag) via a reusable
+      `SoftDeletableEntity` + domain `markDeleted()`; `@SQLRestriction("deleted_at is null")`
+      filters reads; unique email stays locked (DB constraint → `DataIntegrityViolationException`
+      → 409).
+- [x] **DB indexing** — `idx_patients_name` on the default sort column; add composite indexes with
+      the leftmost-prefix rule as query patterns emerge. `[#13/#16]`
+- [x] **API versioning** — paths are under `/api/v1/...`. `[#62]`
+- [x] **ETag / conditional requests** — `GET /{id}` returns `@Version` as the ETag; `If-None-Match`
+      → 304. (Writes use body-version optimistic locking, not `If-Match`.) `[#44/#45]`
+- [ ] **Idempotency-Key on `POST`** — dedupe retried creates. Deferred to `billing-service` where
+      it's critical (money), then backport. `[#1]`
 
 ## Tier 2 — observability & ops (before traffic grows)
 

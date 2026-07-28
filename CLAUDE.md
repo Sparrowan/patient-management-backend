@@ -68,6 +68,22 @@ com.pm.<service>/
   client's `version` and responses expose it. The service rejects a stale version with
   `ObjectOptimisticLockingFailureException` → 409. Use `saveAndFlush` on update so the response
   returns the *incremented* version (plain `save` flushes at commit, after mapping).
+- **`BaseEntity` mapped superclass** carries the cross-cutting persistence fields: `@CreatedDate`
+  `createdAt` / `@LastModifiedDate` `updatedAt` (via `@EnableJpaAuditing`) + `@Version`. Every
+  entity extends it. `createdBy`/`updatedBy` come once an `AuditorAware` (auth) exists.
+- **Soft delete** is opt-in via a reusable `SoftDeletableEntity extends BaseEntity`. A single
+  nullable `deletedAt` is the whole state (null = live; `isDeleted()` derives from it — no
+  redundant boolean). A domain `markDeleted()` stamps it; the service saves (a normal UPDATE, so
+  auditing fires). Each concrete entity adds `@SQLRestriction("deleted_at is null")` itself
+  (Hibernate applies it per-entity, not via the superclass). The row (and its unique email) is
+  retained, so emails are **not** reusable — a re-create hits the DB constraint →
+  `DataIntegrityViolationException` → 409. Append-only entities (e.g. a ledger) do not extend it.
+  Tests hard-`TRUNCATE` between cases (not `deleteAll()`, which only soft-deletes).
+- **API paths are versioned** under `/api/v1/...` so the contract can evolve without breaking
+  clients.
+- **ETag / conditional reads**: `GET /{id}` returns the entity `@Version` as the ETag;
+  `If-None-Match` → 304. Writes use body-version optimistic locking (not `If-Match`).
+- **Never log PII/PHI** (names, emails, DOB, addresses). Logs carry ids + the correlation id only.
 - **SOLID where it earns its keep**:
   - SRP — one responsibility per layer (controller ≠ service ≠ repository).
   - DIP/OCP — controllers depend on service *interfaces*; Spring injects the impl.
@@ -161,5 +177,9 @@ compilation problems` / `No qualifying bean of type PatientMapper` at startup). 
 - [x] Booted & verified end-to-end (201/200/400/404/409, Swagger, DB persistence)
 - [x] Tests: unit (Mockito) + web slice (`@WebMvcTest`) + integration (Testcontainers MariaDB), 27 green
 - [x] Optimistic locking (`@Version`, Level 2)
-- [ ] Remaining Tier 1: auditing `BaseEntity`, soft-delete — see ROADMAP.md
+- [x] Auditing `BaseEntity` (createdAt/updatedAt), soft-delete (`@SoftDelete`, locked email → 409)
+- [x] API versioning (`/api/v1`), ETag/304 conditional reads, `idx_patients_name`
+- [x] Observability: structured JSON logs (ECS), `CorrelationIdFilter`, catch-all → 500, graceful shutdown
+- [x] Dockerized (multi-stage image + compose w/ per-service DB)
+- [ ] Next: `scaffold-service` skill, then `billing-service` (gRPC + fintech patterns) — see ROADMAP.md
 - [ ] remaining services + gateway

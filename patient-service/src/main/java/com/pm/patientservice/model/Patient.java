@@ -6,25 +6,29 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
-import jakarta.persistence.Version;
 import java.time.LocalDate;
 import java.util.UUID;
 import lombok.Getter;
+import org.hibernate.annotations.SQLRestriction;
 
 /**
  * Patient aggregate. A rich domain model: state changes go through intention-revealing
  * behavior ({@link #register}, {@link #updateDetails}), never public setters, so the entity
- * owns its own invariants. {@code registeredDate} in particular is stamped at registration and
- * cannot be set or backdated by callers.
+ * owns its own invariants. {@code registeredDate} is stamped at registration and cannot be
+ * backdated by callers. Audit timestamps + version are inherited from {@link BaseEntity}.
  *
- * <p>Lombok generates getters only — deliberately no {@code @Setter}/{@code @Data}, which would
- * reintroduce setters (breaking encapsulation) and, via toString/equals, touch state in ways
- * that misbehave on JPA entities.
+ * <p>Soft delete: {@link #markDeleted()} sets {@code deleted}/{@code deletedAt} and the row is
+ * kept; {@code @SQLRestriction} filters soft-deleted rows out of every query. The email stays in
+ * the {@code UNIQUE} index while soft-deleted (emails are not reusable) — a re-create with that
+ * email hits the DB constraint, mapped to 409 by the handler.
+ *
+ * <p>Lombok generates getters only — never {@code @Setter}/{@code @Data} on a JPA entity.
  */
 @Entity
 @Table(name = "patients")
+@SQLRestriction("deleted_at is null")
 @Getter
-public class Patient {
+public class Patient extends SoftDeletableEntity {
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
@@ -44,10 +48,6 @@ public class Patient {
 
     @Column(nullable = false)
     private LocalDate registeredDate;
-
-    /** Optimistic-lock version. Managed by JPA; bumped on every update to detect lost updates. */
-    @Version
-    private long version;
 
     /** Required by JPA. Use {@link #register} to create instances. */
     protected Patient() {
