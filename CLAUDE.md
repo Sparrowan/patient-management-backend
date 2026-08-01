@@ -26,12 +26,16 @@ multi-module reactor build.
 ```
 patient-management/
 ├── patient-service/     # core patient CRUD (REST + JPA + MariaDB)   ← reference service
-├── billing-service/     # (planned) gRPC billing, called by patient-service
+├── billing-service/     # billing accounts + ledger; gRPC server called by patient-service
+├── docker-compose.yml   # root orchestration: both services + a DB container each
 ├── analytics-service/   # (planned) Kafka consumer, event-driven
 ├── auth-service/        # (planned) JWT issuing + validation
-├── api-gateway/         # (planned) Spring Cloud Gateway, single entry point
-└── infrastructure/      # (planned) shared docker-compose (DBs, Kafka)
+└── api-gateway/         # (planned) Spring Cloud Gateway, single entry point
 ```
+
+Each service holds its own copy of `billing.proto` under `src/main/proto/` and generates its own
+stubs — a deliberate trade-off to keep services independently buildable (no shared module / no
+reactor). Drift between copies is caught by a contract test (see ROADMAP).
 
 ## Per-service package structure (layered)
 
@@ -195,5 +199,16 @@ compilation problems` / `No qualifying bean of type PatientMapper` at startup). 
       (unique-key replay), insufficient-funds → 422, money never rounded (`@Digits`), 30 tests
 - [x] `billing-service` dockerized (multi-stage image + `billing-service-db` in root compose);
       both services + their DBs come up with `docker compose up --build`. 60 tests green total.
-- [ ] Next: gRPC `patient → billing` (open account on patient registration)
+- [x] gRPC `patient → billing`: registering a patient opens a billing account via billing's
+      `OpenAccount` RPC (net.devh, deadline, after-commit event, best-effort). Verified end-to-end.
+- [ ] Next: gRPC integration tests; then Resilience4j on the patient→billing call, Outbox
+
+**gRPC note:** uses **net.devh `grpc-spring-boot-starter` 3.1.0** on both sides, NOT the official
+`org.springframework.grpc` — its only published Boot starter (1.0.3) is binary-incompatible with
+Boot 3.5 (references a removed `PropertyMapper$Source$Adapter`), and 1.1.0 ships no Boot starter
+yet. Pinned to **grpc 1.61.1 / protobuf 3.25.5** (net.devh's runtime) so the xolstice-generated
+stubs match; `javax.annotation-api` is a provided dep for the generated `@Generated`. The `billing.proto`
+contract is **copied into each service** (`src/main/proto/`) and each generates its own stubs —
+a deliberate independent-services trade-off (no shared module / reactor); drift is caught by a
+contract test (see ROADMAP). Billing runs a gRPC server on **:9001** alongside REST **:4001**.
 - [ ] remaining services + gateway

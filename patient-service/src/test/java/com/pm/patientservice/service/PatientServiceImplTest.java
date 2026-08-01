@@ -48,6 +48,7 @@ class PatientServiceImplTest {
 
     @Mock private PatientRepository patientRepository;
     @Mock private PatientMapper patientMapper;
+    @Mock private org.springframework.context.ApplicationEventPublisher eventPublisher;
     @InjectMocks private PatientServiceImpl patientService;
 
     private Patient existingPatient() {

@@ -33,6 +33,8 @@ services:
     depends_on:
       patient-service-db:
         condition: service_healthy
+      billing-service:
+        condition: service_started
     environment:
       # Points at the DB container over the compose network (service name is the hostname).
       DB_URL: jdbc:mariadb://patient-service-db:3306/patient_db
@@ -40,6 +42,8 @@ services:
       DB_PASSWORD: patient
       # Non-dev profile: base config, no SQL logging.
       SPRING_PROFILES_ACTIVE: docker
+      # Reach billing's gRPC server over the compose network (service name = hostname).
+      BILLING_GRPC_ADDRESS: static://billing-service:9001
     ports:
       - "4000:4000"
     networks:
@@ -79,6 +83,7 @@ services:
       SPRING_PROFILES_ACTIVE: docker
     ports:
       - "4001:4001"
+      - "9001:9001"   # gRPC (published for host debugging; not required for in-network calls)
     networks:
       - patient-net
 

@@ -17,7 +17,12 @@
 		<java.version>17</java.version>
 		<mapstruct.version>1.6.3</mapstruct.version>
 		<lombok-mapstruct-binding.version>0.2.0</lombok-mapstruct-binding.version>
+		<!-- Aligned with net.devh 3.1.0's runtime (grpc 1.61.x / protobuf 3.25.x) so the generated
+		     stubs match the gRPC/protobuf on the classpath (avoids the protobuf 3.x↔4.x break). -->
+		<grpc.version>1.61.1</grpc.version>
+		<protobuf-java.version>3.25.5</protobuf-java.version>
 	</properties>
+
 	<dependencies>
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
@@ -35,6 +40,23 @@
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-actuator</artifactId>
 		</dependency>
+
+		<!-- gRPC server (net.devh) — billing exposes OpenAccount to patient-service. Boot 3.5-
+		     compatible; the official Spring gRPC 1.0.3 starter is binary-incompatible with Boot 3.5. -->
+		<dependency>
+			<groupId>net.devh</groupId>
+			<artifactId>grpc-server-spring-boot-starter</artifactId>
+			<version>3.1.0.RELEASE</version>
+		</dependency>
+		<!-- grpc-java generated stubs reference javax.annotation.Generated, removed from the JDK
+		     in Java 9+; provide it at compile time. -->
+		<dependency>
+			<groupId>javax.annotation</groupId>
+			<artifactId>javax.annotation-api</artifactId>
+			<version>1.3.2</version>
+			<scope>provided</scope>
+		</dependency>
+
 		<!-- OpenAPI 3 spec (/v3/api-docs) + Swagger UI, generated from the code. -->
 		<dependency>
 			<groupId>org.springdoc</groupId>
@@ -110,7 +132,36 @@
 	</dependencies>
 
 	<build>
+		<extensions>
+			<!-- Supplies ${os.detected.classifier} (e.g. osx-aarch_64) for the protoc binaries. -->
+			<extension>
+				<groupId>kr.motd.maven</groupId>
+				<artifactId>os-maven-plugin</artifactId>
+				<version>1.7.1</version>
+			</extension>
+		</extensions>
 		<plugins>
+			<!-- Generates Java message stubs (compile) + gRPC service stubs (compile-custom) from
+			     src/main/proto, ahead of the Java compile. The proto is copied per service (an
+			     independent-services trade-off; drift is caught by a contract test — see ROADMAP). -->
+			<plugin>
+				<groupId>org.xolstice.maven.plugins</groupId>
+				<artifactId>protobuf-maven-plugin</artifactId>
+				<version>0.6.1</version>
+				<configuration>
+					<protocArtifact>com.google.protobuf:protoc:${protobuf-java.version}:exe:${os.detected.classifier}</protocArtifact>
+					<pluginId>grpc-java</pluginId>
+					<pluginArtifact>io.grpc:protoc-gen-grpc-java:${grpc.version}:exe:${os.detected.classifier}</pluginArtifact>
+				</configuration>
+				<executions>
+					<execution>
+						<goals>
+							<goal>compile</goal>
+							<goal>compile-custom</goal>
+						</goals>
+					</execution>
+				</executions>
+			</plugin>
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>
 				<artifactId>maven-compiler-plugin</artifactId>

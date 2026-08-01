@@ -8,9 +8,11 @@ import com.pm.patientservice.exception.EmailAlreadyExistsException;
 import com.pm.patientservice.exception.PatientNotFoundException;
 import com.pm.patientservice.mapper.PatientMapper;
 import com.pm.patientservice.model.Patient;
+import com.pm.patientservice.event.PatientRegisteredEvent;
 import com.pm.patientservice.repository.PatientRepository;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Pageable;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
@@ -20,8 +22,12 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class PatientServiceImpl implements PatientService {
 
+    /** Currency for a new patient's billing account until per-patient currency exists. */
+    private static final String DEFAULT_CURRENCY = "USD";
+
     private final PatientRepository patientRepository;
     private final PatientMapper patientMapper;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Override
     @Transactional(readOnly = true)
@@ -43,7 +49,10 @@ public class PatientServiceImpl implements PatientService {
         }
         Patient patient = Patient.register(
                 request.name(), request.email(), request.address(), request.dateOfBirth());
-        return patientMapper.toResponse(patientRepository.save(patient));
+        Patient saved = patientRepository.save(patient);
+        // Open the billing account after this transaction commits (BillingGrpcClient listens).
+        eventPublisher.publishEvent(new PatientRegisteredEvent(saved.getId(), DEFAULT_CURRENCY));
+        return patientMapper.toResponse(saved);
     }
 
     @Override

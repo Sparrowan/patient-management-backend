@@ -35,7 +35,7 @@ RUN apt-get update \
 COPY --from=build /build/target/billing-service-*.jar app.jar
 USER app
 
-EXPOSE 4001
+EXPOSE 4001 9001
 HEALTHCHECK --interval=15s --timeout=3s --start-period=40s --retries=5 \
     CMD curl -fsS http://localhost:4001/actuator/health || exit 1
 

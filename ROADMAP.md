@@ -40,6 +40,25 @@ cross-reference the backend-patterns catalog we're prioritizing for banking/fint
 
 ## Tier 3 — platform concerns (as services multiply)
 
+### Inter-service communication (gRPC)
+
+- [x] **gRPC `patient → billing`** — DONE. Registering a patient opens their billing account via
+      billing's `OpenAccount` RPC. Verified end-to-end. `[#72]`
+  - **net.devh `grpc-spring-boot-starter` 3.1.0** (not official Spring gRPC — its only Boot starter,
+    1.0.3, is binary-incompatible with Boot 3.5; 1.1.0 hasn't shipped Boot starters). grpc 1.61 /
+    protobuf 3.25, xolstice codegen.
+  - Single **`.proto` contract**, **copied per service** (each generates its own stubs) to keep
+    services independently buildable — deliberately *not* a shared module/reactor. Drift is caught
+    by a **contract test**; a **Buf schema registry** is the scale evolution (single source with no
+    build coupling). *(A shared module was tried and reverted — it broke independent Docker builds.)*
+  - **Money as `string`** in proto (preserves `BigDecimal`). Server maps domain exceptions → gRPC
+    **status codes** (`ALREADY_EXISTS`, `INVALID_ARGUMENT`) and reuses the existing service logic.
+  - Client sets a **3s deadline** on every call; the call runs in an **after-commit event listener**
+    (no network I/O inside the DB transaction) and is **best-effort** (a billing failure logs but
+    never fails registration). Correlation id flows through via MDC.
+  - Still to layer on: **Resilience4j** (circuit breaker/retry/fallback), **mTLS** in prod, and the
+    fully-reliable **Outbox** so the account is guaranteed even if billing is down at call time.
+
 ### Resilience
 
 - [ ] **Resilience4j** on inter-service calls — Circuit Breaker + Retry + TimeLimiter + Bulkhead

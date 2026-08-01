@@ -1,0 +1,29 @@
+syntax = "proto3";
+
+package billing;
+
+option java_multiple_files = true;
+option java_package = "com.pm.billing.grpc";
+option java_outer_classname = "BillingProto";
+
+// Billing operations invoked by other services (e.g. patient-service on registration).
+// This .proto is the contract; keep it identical wherever it is copied until a shared
+// contract artifact / schema registry replaces the copies (see ROADMAP).
+service BillingService {
+
+  // Opens a billing account for a patient. A second call for the same patient fails with
+  // ALREADY_EXISTS.
+  rpc OpenAccount(OpenAccountRequest) returns (OpenAccountResponse);
+}
+
+message OpenAccountRequest {
+  string patient_id = 1;  // UUID as string
+  string currency = 2;    // ISO-4217, e.g. "USD"
+}
+
+message OpenAccountResponse {
+  string account_id = 1;  // UUID as string
+  string status = 2;      // e.g. "ACTIVE"
+  string balance = 3;     // money as string to preserve BigDecimal precision, e.g. "0.00"
+  string currency = 4;
+}
