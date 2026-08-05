@@ -34,3 +34,7 @@ build/
 
 ### Local secrets ###
 .env
+
+### mTLS dev certs — never commit ANY of it. Regenerate with ./generate-certs.sh.
+### (Even the public CA/certs stay out; prod uses Vault/mesh-issued short-lived certs.)
+src/main/resources/certs/

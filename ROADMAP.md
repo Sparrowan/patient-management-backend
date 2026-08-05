@@ -95,8 +95,15 @@ cross-reference the backend-patterns catalog we're prioritizing for banking/fint
 ### Security (regulated domain — PHI / financial)
 
 - [ ] **`auth-service`** — JWT / OAuth2 resource server; **RBAC/ABAC** least privilege. `[#27/#28/#29]`
-- [ ] **mTLS** between services + **TLS 1.3** at the edge. `[#33]`
-- [ ] **Secrets management** (Vault) — no committed secrets.
+- [~] **Zero-trust inter-service security** (never trust the network; encrypt + authenticate +
+      authorize *every* call): `[#33]`
+  - [~] **mTLS** between services — app-level mTLS on the patient↔billing gRPC call (done, dev
+        self-signed certs). Production moves this into a **service mesh (Istio/Linkerd)** where
+        sidecars do mTLS transparently with **auto-rotating short-lived certs**.
+  - [ ] **Workload identity (SPIFFE/SPIRE)** — cryptographic per-service identity for authz.
+  - [ ] **AuthorizationPolicy** — which caller may invoke which RPC (mesh-level RBAC).
+  - [ ] **NetworkPolicies** (K8s) — restrict pod-to-pod; **TLS 1.3** at the edge.
+- [ ] **Secrets / cert management** (Vault) — no committed keys; rotation.
 - [ ] **Field-level encryption at rest** for PII/PHI (email, DOB, address). `[#34]`
 - [ ] **HMAC request signing** for partner/webhook APIs. `[#97]`
 

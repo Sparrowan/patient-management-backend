@@ -211,4 +211,12 @@ stubs match; `javax.annotation-api` is a provided dep for the generated `@Genera
 contract is **copied into each service** (`src/main/proto/`) and each generates its own stubs —
 a deliberate independent-services trade-off (no shared module / reactor); drift is caught by a
 contract test (see ROADMAP). Billing runs a gRPC server on **:9001** alongside REST **:4001**.
+
+**gRPC is secured with mTLS** (encrypted + both sides authenticate via certs — the zero-trust
+baseline). Dev self-signed certs live in each service's `src/main/resources/certs/` (a CA + a
+per-service cert; SANs cover `localhost` and `billing-service`). Server: `grpc.server.security.*`
+with `client-auth=REQUIRE`. Client: `grpc.client.billing.security.*` — **must set
+`client-auth-enabled=true`** or the client cert is configured but never presented (→
+`TLSV1_ALERT_CERTIFICATE_REQUIRED`). **Private keys (`*-key.pem`) are git-ignored.** Production
+moves mTLS into a service mesh (Istio/SPIFFE) with auto-rotating certs — see ROADMAP.
 - [ ] remaining services + gateway
