@@ -7,12 +7,16 @@ import com.pm.patientservice.dto.PatientUpdateRequestDTO;
 import com.pm.patientservice.exception.EmailAlreadyExistsException;
 import com.pm.patientservice.exception.PatientNotFoundException;
 import com.pm.patientservice.mapper.PatientMapper;
+import com.pm.patientservice.model.OutboxEvent;
 import com.pm.patientservice.model.Patient;
-import com.pm.patientservice.event.PatientRegisteredEvent;
+import com.pm.patientservice.outbox.PatientRegisteredPayload;
+import com.pm.patientservice.repository.OutboxEventRepository;
 import com.pm.patientservice.repository.PatientRepository;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.time.Instant;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Pageable;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
@@ -27,7 +31,8 @@ public class PatientServiceImpl implements PatientService {
 
     private final PatientRepository patientRepository;
     private final PatientMapper patientMapper;
-    private final ApplicationEventPublisher eventPublisher;
+    private final OutboxEventRepository outboxRepository;
+    private final ObjectMapper objectMapper;
 
     @Override
     @Transactional(readOnly = true)
@@ -50,9 +55,24 @@ public class PatientServiceImpl implements PatientService {
         Patient patient = Patient.register(
                 request.name(), request.email(), request.address(), request.dateOfBirth());
         Patient saved = patientRepository.save(patient);
-        // Open the billing account after this transaction commits (BillingGrpcClient listens).
-        eventPublisher.publishEvent(new PatientRegisteredEvent(saved.getId(), DEFAULT_CURRENCY));
+        // Transactional outbox: record the "open a billing account" intent in the SAME transaction
+        // as the patient insert. The OutboxRelay ships it to Kafka after commit — guaranteed
+        // delivery, unlike the old best-effort gRPC call it replaces.
+        outboxRepository.save(
+                OutboxEvent.forPatientRegistered(saved.getId(), registeredPayload(saved.getId())));
         return patientMapper.toResponse(saved);
+    }
+
+    /** Serializes the {@code PatientRegistered} payload stored in the outbox row (ids only, no PHI). */
+    private String registeredPayload(UUID patientId) {
+        PatientRegisteredPayload payload = new PatientRegisteredPayload(
+                UUID.randomUUID().toString(), patientId.toString(), DEFAULT_CURRENCY, Instant.now().toEpochMilli());
+        try {
+            return objectMapper.writeValueAsString(payload);
+        } catch (JsonProcessingException e) {
+            // A record of String/long fields cannot realistically fail to serialize.
+            throw new IllegalStateException("Failed to serialize PatientRegistered payload", e);
+        }
     }
 
     @Override

@@ -21,7 +21,19 @@
 		     stubs match the gRPC/protobuf on the classpath (avoids the protobuf 3.x↔4.x break). -->
 		<grpc.version>1.61.1</grpc.version>
 		<protobuf-java.version>3.25.5</protobuf-java.version>
+		<!-- Kafka Avro serialization + Schema Registry client (Confluent). Avro codegen pinned to
+		     the version Confluent 7.8 ships at runtime so generated classes match the serde. -->
+		<confluent.version>7.8.0</confluent.version>
+		<avro.version>1.11.4</avro.version>
 	</properties>
+
+	<!-- kafka-avro-serializer and the Schema Registry client are published only in Confluent's repo. -->
+	<repositories>
+		<repository>
+			<id>confluent</id>
+			<url>https://packages.confluent.io/maven/</url>
+		</repository>
+	</repositories>
 
 	<dependencies>
 		<dependency>
@@ -41,7 +53,25 @@
 			<artifactId>spring-boot-starter-actuator</artifactId>
 		</dependency>
 
-		<!-- gRPC server (net.devh) — billing exposes OpenAccount to patient-service. Boot 3.5-
+		<!-- Kafka: billing-service is an event CONSUMER (opens accounts from PatientRegistered).
+		     Version managed by Boot's BOM. -->
+		<dependency>
+			<groupId>org.springframework.kafka</groupId>
+			<artifactId>spring-kafka</artifactId>
+		</dependency>
+		<!-- Avro runtime + Confluent Avro deserializer (reads schemas from Schema Registry). -->
+		<dependency>
+			<groupId>org.apache.avro</groupId>
+			<artifactId>avro</artifactId>
+			<version>${avro.version}</version>
+		</dependency>
+		<dependency>
+			<groupId>io.confluent</groupId>
+			<artifactId>kafka-avro-serializer</artifactId>
+			<version>${confluent.version}</version>
+		</dependency>
+
+		<!-- gRPC server (net.devh) — billing exposes OpenAccount as a synchronous API. Boot 3.5-
 		     compatible; the official Spring gRPC 1.0.3 starter is binary-incompatible with Boot 3.5. -->
 		<dependency>
 			<groupId>net.devh</groupId>
@@ -111,6 +141,17 @@
 			<artifactId>spring-boot-starter-test</artifactId>
 			<scope>test</scope>
 		</dependency>
+		<!-- spring-kafka test utilities (consumer/producer helpers, EmbeddedKafka if needed). -->
+		<dependency>
+			<groupId>org.springframework.kafka</groupId>
+			<artifactId>spring-kafka-test</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.testcontainers</groupId>
+			<artifactId>kafka</artifactId>
+			<scope>test</scope>
+		</dependency>
 
 		<!-- Testcontainers: real MariaDB in integration tests (versions from Boot's BOM).
 		     spring-boot-testcontainers enables @ServiceConnection to auto-wire the datasource. -->
@@ -159,6 +200,26 @@
 							<goal>compile</goal>
 							<goal>compile-custom</goal>
 						</goals>
+					</execution>
+				</executions>
+			</plugin>
+			<!-- Generates the Avro PatientRegistered class from src/main/avro/*.avsc (per-service copy,
+			     like billing.proto). stringType=String → plain String fields, not CharSequence. -->
+			<plugin>
+				<groupId>org.apache.avro</groupId>
+				<artifactId>avro-maven-plugin</artifactId>
+				<version>${avro.version}</version>
+				<executions>
+					<execution>
+						<phase>generate-sources</phase>
+						<goals>
+							<goal>schema</goal>
+						</goals>
+						<configuration>
+							<sourceDirectory>${project.basedir}/src/main/avro</sourceDirectory>
+							<outputDirectory>${project.build.directory}/generated-sources/avro</outputDirectory>
+							<stringType>String</stringType>
+						</configuration>
 					</execution>
 				</executions>
 			</plugin>

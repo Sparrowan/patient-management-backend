@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(./mvnw -q generate-sources)",
+      "Bash(./mvnw -q compile)",
+      "Bash(./mvnw test *)",
+      "Bash(docker compose *)",
+      "Bash(./generate-certs.sh)",
+      "Bash(echo \"compose up exit: $?\")",
+      "Bash(grep -E \"\\\\.\\(java|avsc|sql|sh\\)$\")",
+      "Bash(echo \"exit: $?\")"
+    ]
+  }
+}

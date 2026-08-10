@@ -7,6 +7,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pm.patientservice.dto.PagedResponse;
 import com.pm.patientservice.dto.PatientRequestDTO;
 import com.pm.patientservice.dto.PatientResponseDTO;
@@ -14,7 +15,9 @@ import com.pm.patientservice.dto.PatientUpdateRequestDTO;
 import com.pm.patientservice.exception.EmailAlreadyExistsException;
 import com.pm.patientservice.exception.PatientNotFoundException;
 import com.pm.patientservice.mapper.PatientMapper;
+import com.pm.patientservice.model.OutboxEvent;
 import com.pm.patientservice.model.Patient;
+import com.pm.patientservice.repository.OutboxEventRepository;
 import com.pm.patientservice.repository.PatientRepository;
 import java.time.LocalDate;
 import java.util.List;
@@ -27,6 +30,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
@@ -48,7 +52,9 @@ class PatientServiceImplTest {
 
     @Mock private PatientRepository patientRepository;
     @Mock private PatientMapper patientMapper;
-    @Mock private org.springframework.context.ApplicationEventPublisher eventPublisher;
+    @Mock private OutboxEventRepository outboxRepository;
+    // Real ObjectMapper (spy) so the outbox payload is actually serialized, as in production.
+    @Spy private ObjectMapper objectMapper = new ObjectMapper();
     @InjectMocks private PatientServiceImpl patientService;
 
     private Patient existingPatient() {
@@ -116,7 +122,11 @@ class PatientServiceImplTest {
         @DisplayName("registers a patient and stamps the registration date server-side")
         void createsPatient() {
             when(patientRepository.existsByEmail("ada@example.com")).thenReturn(false);
-            when(patientRepository.save(any(Patient.class))).thenAnswer(inv -> inv.getArgument(0));
+            when(patientRepository.save(any(Patient.class))).thenAnswer(inv -> {
+                Patient p = inv.getArgument(0);
+                ReflectionTestUtils.setField(p, "id", ID); // JPA assigns this on persist
+                return p;
+            });
             when(patientMapper.toResponse(any(Patient.class))).thenReturn(responseDto());
 
             PatientResponseDTO result = patientService.createPatient(request);
@@ -126,6 +136,15 @@ class PatientServiceImplTest {
             verify(patientRepository).save(saved.capture());
             assertThat(saved.getValue().getRegisteredDate()).isNotNull();
             assertThat(saved.getValue().getName()).isEqualTo("Ada Lovelace");
+
+            // Transactional outbox: a PatientRegistered event is recorded in the same flow, keyed
+            // to the patient id, with ids only in the payload (no PHI).
+            ArgumentCaptor<OutboxEvent> outbox = ArgumentCaptor.forClass(OutboxEvent.class);
+            verify(outboxRepository).save(outbox.capture());
+            assertThat(outbox.getValue().getAggregateId()).isEqualTo(ID);
+            assertThat(outbox.getValue().getEventType()).isEqualTo("PatientRegistered");
+            assertThat(outbox.getValue().getTopic()).isEqualTo("patient.registered");
+            assertThat(outbox.getValue().getPayload()).contains(ID.toString()).doesNotContain("ada@example.com");
         }
 
         @Test
@@ -136,6 +155,7 @@ class PatientServiceImplTest {
             assertThatThrownBy(() -> patientService.createPatient(request))
                     .isInstanceOf(EmailAlreadyExistsException.class);
             verify(patientRepository, never()).save(any());
+            verify(outboxRepository, never()).save(any());
         }
     }
 

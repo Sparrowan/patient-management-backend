@@ -122,6 +122,15 @@ com.pm.<service>/
 - **Build**: use `./mvnw` (runs on JDK 17). Lombok + MapStruct processors are declared as
   provided-scope deps; `~/.m2/toolchains.xml` (JDK 17) guards against the system `mvn`
   running on Java 26.
+- **Config externalization (12-factor)**: externalize only what *changes between environments*
+  (DB URL/creds, `SPRING_PROFILES_ACTIVE`, service addresses like `BILLING_GRPC_ADDRESS`) via
+  `${VAR:default}` placeholders. *Invariant/behavioral* config (`ddl-auto=validate`, Flyway
+  locations, pagination caps, `open-in-view=false`, mTLS `client-auth=REQUIRE`) stays hardcoded
+  in `application.properties` — moving it to env vars only adds risk (e.g. a stray
+  `ddl-auto=create-drop` in prod) for no benefit. `.env` is a **local-dev convenience only**
+  (loaded by spring-dotenv, git-ignored); prod injects real env vars via the orchestrator and
+  secrets via Vault/k8s Secrets — never a committed file. Every externalized var is documented
+  in the committed `.env.example`, each with a safe default.
 
 ### REST / API conventions
 
@@ -156,6 +165,31 @@ com.pm.<service>/
   `sort` property throws `PropertyReferenceException` → mapped to 400 in the global handler.
 - **Every endpoint is documented** with springdoc OpenAPI (`@Operation`, `@ApiResponse`,
   `@Tag`) so `/swagger-ui.html` stays complete.
+
+### Event-driven / messaging conventions
+
+- **Two transports, on purpose**: **gRPC** for *synchronous* command/query between two services
+  (billing keeps an `OpenAccount` gRPC server for future sync callers); **Kafka** for *asynchronous*
+  event broadcast. Registering a patient is async → Kafka, not gRPC.
+- **Transactional Outbox for reliable publishing**: never dual-write (save to DB *then* publish —
+  a crash between them loses the event). The event is written to an `outbox_events` row **in the
+  same transaction** as the business change; a `@Scheduled` **`OutboxRelay`** ships unpublished rows
+  to Kafka and stamps `published_at`. Delivery is **at-least-once**; combined with an idempotent
+  consumer it's effectively exactly-once. Relay uses a bounded oldest-first poll; multi-instance
+  safety (`SKIP LOCKED`/ShedLock) and CDC (Debezium) are the scale evolutions — see ROADMAP.
+- **Avro + Schema Registry** is the wire contract. The `.avsc` is **copied per service** (same
+  independent-services trade-off as `billing.proto`); each generates its own class via
+  `avro-maven-plugin` (`stringType=String`). Confluent images run **KRaft** (no ZooKeeper).
+- **No PHI on the wire**: events carry ids + a currency + timestamps — never name/email/DOB (the
+  same rule as logging, applied to events). Payloads stamp an `eventId` at creation (stable across
+  relay retries → the consumer's idempotency key).
+- **Idempotent consumers**: rely on a natural unique key where one exists (opening an account is
+  keyed on `patientId`; a duplicate throws `AccountAlreadyExistsException`, which the listener
+  treats as **success** and never rethrows — so a redelivery is not dead-lettered).
+- **DLQ, not poison-loop**: consumers use `DefaultErrorHandler` + `DeadLetterPublishingRecoverer`
+  → `<topic>.DLT` after a bounded retry. `ErrorHandlingDeserializer` wraps the Avro deserializer so
+  an undeserializable record is dead-lettered immediately (non-retryable) instead of jamming the
+  partition. The recoverer routes by value type (Avro object vs raw bytes) via a two-template map.
 
 ## Build & run
 
@@ -199,9 +233,18 @@ compilation problems` / `No qualifying bean of type PatientMapper` at startup). 
       (unique-key replay), insufficient-funds → 422, money never rounded (`@Digits`), 30 tests
 - [x] `billing-service` dockerized (multi-stage image + `billing-service-db` in root compose);
       both services + their DBs come up with `docker compose up --build`. 60 tests green total.
-- [x] gRPC `patient → billing`: registering a patient opens a billing account via billing's
-      `OpenAccount` RPC (net.devh, deadline, after-commit event, best-effort). Verified end-to-end.
-- [ ] Next: gRPC integration tests; then Resilience4j on the patient→billing call, Outbox
+- [x] gRPC `billing` server (`OpenAccount`, net.devh) secured with **mTLS** (dev certs, zero cert
+      material committed — `./generate-certs.sh` regenerates a shared CA + per-service certs;
+      `certs/` git-ignored). Now a **synchronous API kept for future callers** — registration no
+      longer uses it. *(The patient-side gRPC client + Resilience4j were removed in the Kafka
+      conversion below; that history lives in git.)*
+- [x] **Kafka event backbone** (KRaft) + **Confluent Schema Registry** + **Avro** contracts +
+      **kafka-ui**. Registering a patient now publishes `PatientRegistered` via the **Transactional
+      Outbox** (`outbox_events` + `@Scheduled OutboxRelay`, at-least-once); `billing` consumes it
+      (`@KafkaListener`), opens the account **idempotently** (duplicate → success, no DLQ), with a
+      **DLQ** (`patient.registered.DLT`) on exhausted retries / poison messages.
+- [ ] Next: end-to-end Docker verification of the outbox→Kafka→billing flow; then CDC (Debezium)
+      + multi-instance relay locking; Saga for cross-service transactions
 
 **gRPC note:** uses **net.devh `grpc-spring-boot-starter` 3.1.0** on both sides, NOT the official
 `org.springframework.grpc` — its only published Boot starter (1.0.3) is binary-incompatible with

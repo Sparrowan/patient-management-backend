@@ -42,8 +42,10 @@ cross-reference the backend-patterns catalog we're prioritizing for banking/fint
 
 ### Inter-service communication (gRPC)
 
-- [x] **gRPC `patient → billing`** — DONE. Registering a patient opens their billing account via
-      billing's `OpenAccount` RPC. Verified end-to-end. `[#72]`
+- [x] **gRPC `billing` `OpenAccount` server** — net.devh, mTLS. *Note:* this was originally the
+      registration trigger (patient called it after commit); registration has since **moved to the
+      Kafka/Outbox path** (Event-driven section). billing **keeps the gRPC server as a synchronous
+      API** for future callers; the patient-side gRPC client was removed. `[#72]`
   - **net.devh `grpc-spring-boot-starter` 3.1.0** (not official Spring gRPC — its only Boot starter,
     1.0.3, is binary-incompatible with Boot 3.5; 1.1.0 hasn't shipped Boot starters). grpc 1.61 /
     protobuf 3.25, xolstice codegen.
@@ -53,16 +55,18 @@ cross-reference the backend-patterns catalog we're prioritizing for banking/fint
     build coupling). *(A shared module was tried and reverted — it broke independent Docker builds.)*
   - **Money as `string`** in proto (preserves `BigDecimal`). Server maps domain exceptions → gRPC
     **status codes** (`ALREADY_EXISTS`, `INVALID_ARGUMENT`) and reuses the existing service logic.
-  - Client sets a **3s deadline** on every call; the call runs in an **after-commit event listener**
-    (no network I/O inside the DB transaction) and is **best-effort** (a billing failure logs but
-    never fails registration). Correlation id flows through via MDC.
-  - Still to layer on: **Resilience4j** (circuit breaker/retry/fallback), **mTLS** in prod, and the
-    fully-reliable **Outbox** so the account is guaranteed even if billing is down at call time.
+  - **mTLS** (dev certs) secures the server. The old client-side pieces (3s deadline, after-commit
+    listener, best-effort fallback, Resilience4j) were removed when registration moved to Kafka —
+    the **Outbox** now provides the guaranteed delivery those were approximating. History in git.
 
 ### Resilience
 
-- [ ] **Resilience4j** on inter-service calls — Circuit Breaker + Retry + TimeLimiter + Bulkhead
-      (`patient → billing`). `[#7/#11/#12]`
+- [~] **Resilience4j** — was implemented on the `patient → billing` gRPC call (Circuit Breaker +
+      Retry + fallback), then **removed** when that call was replaced by the Kafka/Outbox path
+      (async delivery is guaranteed by the outbox, not by client-side resilience). Re-introduce when
+      a **new synchronous** inter-service call needs it (e.g. a future gRPC query). The reasoning
+      still holds: TimeLimiter only where an async/`Future` return exists; Bulkhead where concurrency
+      isn't already bounded. `[#7/#11/#12]`
 - [ ] **Rate limiting** (token bucket) at the gateway + **load shedding**. `[#2/#8]`
 
 ### Platform
@@ -86,7 +90,14 @@ cross-reference the backend-patterns catalog we're prioritizing for banking/fint
 
 ### Event-driven & money (mostly `billing-service`)
 
-- [ ] **Kafka** + **Outbox pattern** + **idempotent consumers** + **DLQ**. `[#55/#52]`
+- [x] **Kafka** (KRaft) + **Schema Registry** (Avro) + **Outbox pattern** + **idempotent consumers**
+      + **DLQ** — registering a patient publishes `PatientRegistered` via a transactional outbox
+      (`outbox_events` + `@Scheduled OutboxRelay`, at-least-once); `billing` consumes it and opens the
+      account idempotently (duplicate → success), with `patient.registered.DLT` for poison/exhausted
+      records. Replaced the best-effort gRPC trigger. **kafka-ui** on `:8080` for inspection. `[#55/#52]`
+  - Still to layer on: **CDC (Debezium)** to replace the polling relay; **multi-instance relay
+    safety** (`SELECT … FOR UPDATE SKIP LOCKED` or ShedLock — ties into Distributed locks below);
+    an **outbox reaper** (purge/alert on old published/failed rows).
 - [ ] **Saga pattern** for cross-service transactions (transfer = debit + credit). `[#56]`
 - [x] **Immutable ledger** for billing — append-only `ledger_entries` (each money movement with
       `balanceAfter`); full event-sourcing/double-entry is a later evolution. `[#53]`
@@ -97,9 +108,12 @@ cross-reference the backend-patterns catalog we're prioritizing for banking/fint
 - [ ] **`auth-service`** — JWT / OAuth2 resource server; **RBAC/ABAC** least privilege. `[#27/#28/#29]`
 - [~] **Zero-trust inter-service security** (never trust the network; encrypt + authenticate +
       authorize *every* call): `[#33]`
-  - [~] **mTLS** between services — app-level mTLS on the patient↔billing gRPC call (done, dev
-        self-signed certs). Production moves this into a **service mesh (Istio/Linkerd)** where
-        sidecars do mTLS transparently with **auto-rotating short-lived certs**.
+  - [x] **mTLS** between services — app-level mTLS on the patient↔billing gRPC call (dev
+        self-signed certs). No cert material is committed: `certs/` is git-ignored and
+        `./generate-certs.sh` regenerates a shared CA + per-service certs on demand (same posture
+        as prod — regenerate per environment). Production moves this into a **service mesh
+        (Istio/Linkerd)** where sidecars do mTLS transparently with **auto-rotating short-lived
+        certs**; the CA private key lives in an HSM/Vault.
   - [ ] **Workload identity (SPIFFE/SPIRE)** — cryptographic per-service identity for authz.
   - [ ] **AuthorizationPolicy** — which caller may invoke which RPC (mesh-level RBAC).
   - [ ] **NetworkPolicies** (K8s) — restrict pod-to-pod; **TLS 1.3** at the edge.

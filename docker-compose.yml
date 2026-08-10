@@ -1,11 +1,91 @@
 # Root orchestration for the patient-management system. Each service is built from its own
 # Dockerfile and gets its own database container (database-per-service). Bring the stack up with:
+#   ./generate-certs.sh          # dev mTLS certs for billing's gRPC server (once)
 #   docker compose up --build
+#
+# Event backbone: Kafka (KRaft, no ZooKeeper) + Confluent Schema Registry (Avro contracts).
+# kafka-ui (http://localhost:8080) is a dev-only console to watch topics/messages/schemas/DLQ.
 #
 # Dev credentials are inline here on purpose (local only). Production injects secrets via the
 # environment / a secrets manager — never committed.
 
 services:
+  # --- Event infrastructure -------------------------------------------------------------------
+  kafka:
+    image: confluentinc/cp-kafka:7.8.0
+    container_name: kafka
+    environment:
+      # KRaft single-node: this one broker is also the controller (no ZooKeeper).
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka:9093"
+      # INTERNAL (kafka:9092) is for in-network clients; EXTERNAL (localhost:9092) is host-mapped
+      # so a service running on the host (local dev) can reach the same broker.
+      KAFKA_LISTENERS: "INTERNAL://kafka:9092,CONTROLLER://kafka:9093,EXTERNAL://0.0.0.0:29092"
+      KAFKA_ADVERTISED_LISTENERS: "INTERNAL://kafka:9092,EXTERNAL://localhost:9092"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT"
+      KAFKA_INTER_BROKER_LISTENER_NAME: "INTERNAL"
+      KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      # Single broker → everything replicates to itself.
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      # Fixed cluster id keeps the KRaft metadata log stable across restarts.
+      CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qk"
+    ports:
+      - "9092:29092"   # host localhost:9092 → container EXTERNAL listener (local dev)
+    healthcheck:
+      # Probe the INTERNAL listener by its own hostname — it's bound to the `kafka` interface,
+      # not localhost (EXTERNAL is on :29092), so localhost:9092 would wrongly report unhealthy.
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "kafka:9092"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - patient-net
+
+  schema-registry:
+    image: confluentinc/cp-schema-registry:7.8.0
+    container_name: schema-registry
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: kafka:9092
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+    ports:
+      - "8081:8081"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/subjects"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks:
+      - patient-net
+
+  kafka-ui:
+    image: ghcr.io/kafbat/kafka-ui:latest
+    container_name: kafka-ui
+    depends_on:
+      kafka:
+        condition: service_healthy
+      schema-registry:
+        condition: service_healthy
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      KAFKA_CLUSTERS_0_SCHEMAREGISTRY: http://schema-registry:8081
+      DYNAMIC_CONFIG_ENABLED: "true"
+    ports:
+      - "8080:8080"
+    networks:
+      - patient-net
+
+  # --- patient-service (event producer via the transactional outbox) --------------------------
   patient-service-db:
     image: mariadb:11.7
     container_name: patient-service-db
@@ -33,8 +113,10 @@ services:
     depends_on:
       patient-service-db:
         condition: service_healthy
-      billing-service:
-        condition: service_started
+      kafka:
+        condition: service_healthy
+      schema-registry:
+        condition: service_healthy
     environment:
       # Points at the DB container over the compose network (service name is the hostname).
       DB_URL: jdbc:mariadb://patient-service-db:3306/patient_db
@@ -42,13 +124,15 @@ services:
       DB_PASSWORD: patient
       # Non-dev profile: base config, no SQL logging.
       SPRING_PROFILES_ACTIVE: docker
-      # Reach billing's gRPC server over the compose network (service name = hostname).
-      BILLING_GRPC_ADDRESS: static://billing-service:9001
+      # Event backbone (in-network hostnames).
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      SCHEMA_REGISTRY_URL: http://schema-registry:8081
     ports:
       - "4000:4000"
     networks:
       - patient-net
 
+  # --- billing-service (event consumer; also keeps a synchronous gRPC API) --------------------
   billing-service-db:
     image: mariadb:11.7
     container_name: billing-service-db
@@ -76,14 +160,20 @@ services:
     depends_on:
       billing-service-db:
         condition: service_healthy
+      kafka:
+        condition: service_healthy
+      schema-registry:
+        condition: service_healthy
     environment:
       DB_URL: jdbc:mariadb://billing-service-db:3306/billing_db
       DB_USERNAME: billing
       DB_PASSWORD: billing
       SPRING_PROFILES_ACTIVE: docker
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      SCHEMA_REGISTRY_URL: http://schema-registry:8081
     ports:
       - "4001:4001"
-      - "9001:9001"   # gRPC (published for host debugging; not required for in-network calls)
+      - "9001:9001"   # gRPC (synchronous API; published for host debugging)
     networks:
       - patient-net
 
