@@ -17,25 +17,24 @@ than a shared multi-module build.
                          └──────┬──────┘
              ┌──────────────────┼──────────────────┐
              ▼                  ▼                  ▼
-      ┌──────────────┐  ┌───────────────┐        ┌───────────────┐
-      │ auth-service │  │patient-service│        │billing-service│
-      │   planned    │  │  REST :4000   │        │  REST :4001   │
-      └──────────────┘  └──────┬────────┘        │  gRPC :9001   │ (sync API, mTLS)
-                               │                 └───────▲───────┘
-        register / delete → transactional outbox          │  @KafkaListener (@KafkaHandler/type)
-                               │  Patient{Registered,     │  register → open account
-                               ▼  Deleted}  (Avro)        │  delete → close/suspend account
-                        ┌──────────────────────────────────────┐   (both idempotent)
-                        │  Kafka  (KRaft)  +  Schema Registry   │  kafka-ui :8080
-                        │  topic: patient-events  (+ .DLT)      │  one ordered stream per patient
-                        └──────────────────────────────────────┘
+   ┌──────────────┐   patient-events  (ordered, Avro)      ┌───────────────┐
+   │ auth-service │   register → open account              │billing-service│
+   │   planned    │   ┌───────────────┐ ───────────────▶   │  REST :4001   │
+   └──────────────┘   │patient-service│   delete → close   │  gRPC :9001   │ (sync API, mTLS)
+                      │  REST :4000   │   (empty) / REJECT  │  producer +   │
+                      │  producer +   │   (funded)          │  consumer     │
+                      │  consumer     │ ◀───────────────    └───────────────┘
+                      └───────────────┘   billing-events
+                        restore patient    (compensation: deletion rejected)
 
+     all over Kafka (KRaft) + Schema Registry ·  kafka-ui :8080 ·  each topic has a  .DLT
   each service ──▶ its own MariaDB database
 ```
 
-**Two transports by design:** **Kafka** carries *asynchronous* events (patient registration →
-billing opens an account, decoupled and guaranteed via the outbox); **gRPC** stays for *synchronous*
-calls (billing's `OpenAccount` server, mTLS-secured, kept for future query-style callers).
+**Two transports by design:** **Kafka** carries *asynchronous* events — patient registration/deletion
+drives billing (guaranteed via the outbox), and billing's rejection drives a **compensating** restore
+back in patient-service. **gRPC** stays for *synchronous* calls (billing's `OpenAccount` server,
+mTLS-secured, kept for future query-style callers). Both services are producers *and* consumers.
 
 ## Tech stack
 
@@ -99,9 +98,11 @@ http://localhost:4001/swagger-ui.html      http://localhost:4001/actuator/health
 transaction an event is written to the `outbox_events` table; the `OutboxRelay` publishes it to the
 Kafka topic `patient-events` (Avro), and billing-service consumes it and opens the account —
 **guaranteed** (survives a billing outage) and **idempotent** (a redelivery is a no-op). Deleting the
-patient (`DELETE /api/v1/patients/{id}`) publishes `PatientDeleted` to the *same* ordered topic, and
-billing **closes** the account (or **suspends** it if funded). Watch it all in kafka-ui at
-`http://localhost:8080`.
+patient (`DELETE /api/v1/patients/{id}`) publishes `PatientDeleted` to the *same* ordered topic:
+billing **closes** an empty account, or — if the account is **funded** — *rejects* the deletion and
+publishes `PatientDeletionRejected`, which patient-service consumes to **restore** the patient (the
+compensating action). So the full loop is: *delete a funded patient → rejected + restored → settle the
+balance → delete again → closed.* Watch it all in kafka-ui at `http://localhost:8080`.
 
 ### Running a single service locally (no Docker)
 

@@ -13,6 +13,7 @@ import com.pm.billingservice.dto.MoneyMovementRequestDTO;
 import com.pm.billingservice.dto.OpenAccountRequestDTO;
 import com.pm.billingservice.dto.PagedResponse;
 import com.pm.billingservice.exception.AccountAlreadyExistsException;
+import com.pm.billingservice.exception.AccountHasBalanceException;
 import com.pm.billingservice.exception.BillingAccountNotFoundException;
 import com.pm.billingservice.exception.InsufficientFundsException;
 import com.pm.billingservice.mapper.BillingAccountMapper;
@@ -275,16 +276,15 @@ class BillingAccountServiceImplTest {
         }
 
         @Test
-        @DisplayName("suspends a funded account (funds settled before closure)")
-        void suspendsFundedAccount() {
+        @DisplayName("rejects deactivation of a funded account (drives the compensation)")
+        void rejectsFundedAccount() {
             BillingAccount account = BillingAccount.openFor(PATIENT_ID, "USD");
             account.credit(new BigDecimal("10.00"));
-            stubMapper(account);
+            when(accountRepository.findByPatientId(PATIENT_ID)).thenReturn(Optional.of(account));
 
-            BillingAccountResponseDTO result = service.deactivateForPatient(PATIENT_ID);
-
-            assertThat(account.getStatus()).isEqualTo(AccountStatus.SUSPENDED);
-            assertThat(result.status()).isEqualTo(AccountStatus.SUSPENDED);
+            assertThatThrownBy(() -> service.deactivateForPatient(PATIENT_ID))
+                    .isInstanceOf(AccountHasBalanceException.class);
+            verify(accountRepository, never()).save(any());
         }
 
         @Test

@@ -1,0 +1,12 @@
+{
+  "namespace": "com.pm.events",
+  "type": "record",
+  "name": "PatientDeletionRejected",
+  "doc": "Emitted by billing when a patient deletion cannot proceed (e.g. the account still holds funds). This is the compensating event: patient-service restores the patient. Identifiers + reason only, no PHI.",
+  "fields": [
+    { "name": "eventId",    "type": "string", "doc": "Unique event id (UUID)." },
+    { "name": "patientId",  "type": "string", "doc": "The patient whose deletion was rejected." },
+    { "name": "reason",     "type": "string", "doc": "Human-readable reason (e.g. 'account has a non-zero balance')." },
+    { "name": "occurredAt", "type": { "type": "long", "logicalType": "timestamp-millis" }, "doc": "When billing rejected the deletion." }
+  ]
+}

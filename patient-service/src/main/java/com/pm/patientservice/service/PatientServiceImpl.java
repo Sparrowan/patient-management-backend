@@ -18,6 +18,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Pageable;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
@@ -26,6 +28,8 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 @RequiredArgsConstructor
 public class PatientServiceImpl implements PatientService {
+
+    private static final Logger log = LoggerFactory.getLogger(PatientServiceImpl.class);
 
     /** Currency for a new patient's billing account until per-patient currency exists. */
     private static final String DEFAULT_CURRENCY = "USD";
@@ -116,6 +120,24 @@ public class PatientServiceImpl implements PatientService {
         // Saga: announce the deletion (same-transaction outbox write) so billing applies its own
         // rule — close/suspend the account — rather than a cross-service cascade delete.
         outboxRepository.save(OutboxEvent.forPatientDeleted(id, deletedPayload(id)));
+    }
+
+    @Override
+    @Transactional
+    public void restorePatient(UUID id, String reason) {
+        // Load including soft-deleted rows (@SQLRestriction hides them from normal queries).
+        patientRepository.findByIdIncludingDeleted(id).ifPresentOrElse(
+                patient -> {
+                    if (patient.isDeleted()) {
+                        patient.restore();
+                        patientRepository.save(patient);
+                        log.info("Restored patient {} after billing rejected deletion: {}", id, reason);
+                    } else {
+                        // Idempotent: a redelivered rejection for an already-live patient.
+                        log.info("Patient {} already live — restore is a no-op (reason: {})", id, reason);
+                    }
+                },
+                () -> log.warn("Cannot restore unknown patient {} (reason: {})", id, reason));
     }
 
     private Patient findByIdOrThrow(UUID id) {

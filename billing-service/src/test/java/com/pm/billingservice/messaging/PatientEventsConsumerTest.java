@@ -1,12 +1,15 @@
 package com.pm.billingservice.messaging;
 
 import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.pm.billingservice.dto.BillingAccountResponseDTO;
 import com.pm.billingservice.dto.OpenAccountRequestDTO;
 import com.pm.billingservice.exception.AccountAlreadyExistsException;
+import com.pm.billingservice.exception.AccountHasBalanceException;
 import com.pm.billingservice.exception.BillingAccountNotFoundException;
 import com.pm.billingservice.model.AccountStatus;
 import com.pm.billingservice.service.BillingAccountService;
@@ -35,6 +38,7 @@ class PatientEventsConsumerTest {
     private static final UUID PATIENT_ID = UUID.fromString("44444444-4444-4444-4444-444444444444");
 
     @Mock private BillingAccountService accountService;
+    @Mock private BillingEventsPublisher billingEventsPublisher;
     @InjectMocks private PatientEventsConsumer consumer;
 
     private PatientRegistered registered() {
@@ -101,6 +105,17 @@ class PatientEventsConsumerTest {
                     .thenThrow(new BillingAccountNotFoundException(PATIENT_ID));
 
             assertThatCode(() -> consumer.onPatientDeleted(deleted())).doesNotThrowAnyException();
+        }
+
+        @Test
+        @DisplayName("funded account → publishes the compensating PatientDeletionRejected")
+        void fundedAccountCompensates() {
+            when(accountService.deactivateForPatient(PATIENT_ID))
+                    .thenThrow(new AccountHasBalanceException(UUID.randomUUID(), new BigDecimal("10.00")));
+
+            consumer.onPatientDeleted(deleted());
+
+            verify(billingEventsPublisher).publishDeletionRejected(eq(PATIENT_ID), anyString());
         }
     }
 }

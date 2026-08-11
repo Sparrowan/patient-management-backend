@@ -98,11 +98,13 @@ cross-reference the backend-patterns catalog we're prioritizing for banking/fint
   - Still to layer on: **CDC (Debezium)** to replace the polling relay; **multi-instance relay
     safety** (`SELECT … FOR UPDATE SKIP LOCKED` or ShedLock — ties into Distributed locks below);
     an **outbox reaper** (purge/alert on old published/failed rows).
-- [~] **Saga pattern** for cross-service transactions. First step done: **choreographed** deletion
-      saga — soft-deleting a patient publishes `PatientDeleted` (same outbox), billing reacts with a
-      business rule (empty → `CLOSED`, funded → `SUSPENDED` pending settlement; never a cascade
-      delete), idempotently. Still to add: the **compensating** leg (billing *rejects* → patient
-      un-deletes) and an **orchestrated** saga (transfer = debit + credit with rollback). `[#56]`
+- [~] **Saga pattern** for cross-service transactions. **Choreographed deletion saga with
+      compensation** done: soft-deleting a patient publishes `PatientDeleted` (patient outbox →
+      `patient-events`); billing **closes** an empty account, or — if the account is funded —
+      **rejects** the deletion and publishes `PatientDeletionRejected` (`billing-events`), which
+      patient-service consumes to **restore** the patient (the compensating action). Both directions
+      idempotent; money can't move on a non-`ACTIVE` account. Still to add: an **orchestrated** saga
+      with a coordinator (e.g. transfer = debit + credit with rollback). `[#56]`
 - [x] **Immutable ledger** for billing — append-only `ledger_entries` (each money movement with
       `balanceAfter`); full event-sourcing/double-entry is a later evolution. `[#53]`
 - [ ] **CDC streaming** for reconciliation/reporting. `[#99]`

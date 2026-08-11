@@ -48,4 +48,10 @@ public interface PatientService {
      * @throws com.pm.patientservice.exception.PatientNotFoundException if none exists
      */
     void deletePatient(UUID id);
+
+    /**
+     * Restores a soft-deleted patient — the compensating action when billing rejects the deletion.
+     * Idempotent: a no-op if the patient is already live or not found. {@code reason} is logged.
+     */
+    void restorePatient(UUID id, String reason);
 }

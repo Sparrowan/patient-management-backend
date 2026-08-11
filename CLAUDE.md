@@ -200,7 +200,16 @@ com.pm.<service>/
   topics a delete can overtake its register (verified). The relay dispatches by `event_type` (one
   outbox → the right Avro record, all to the one topic); the consumer is a class-level
   `@KafkaListener` with a `@KafkaHandler` per type; multiple schemas on one topic need
-  `TopicRecordNameStrategy`. The **compensating** leg (consumer rejects → producer reverses) is next.
+  `TopicRecordNameStrategy`.
+- **Compensation closes the loop**: if a consumer *can't* apply the change, it emits a compensating
+  event and the originator reverses. Deleting a **funded** patient: billing rejects (can't close an
+  account holding money) and publishes `PatientDeletionRejected` on its own outbound stream
+  (`billing-events`); patient-service consumes it and **restores** the patient (`SoftDeletable.restore()`;
+  the restore loads via a native query since `@SQLRestriction` hides deleted rows). Both directions are
+  idempotent. Billing needs **no outbox** for this because the reject path makes no DB change — it only
+  emits a derived event, so at-least-once inbound redelivery + an idempotent restore suffices (no
+  dual-write to protect). Money never moves on a non-`ACTIVE` account (`AccountNotActiveException` → 409).
+  Services are now **both producers and consumers**. Next: an *orchestrated* saga (coordinator + rollback).
 
 ## Build & run
 
@@ -256,11 +265,13 @@ compilation problems` / `No qualifying bean of type PatientMapper` at startup). 
       **DLQ** (`patient-events.DLT`) on exhausted retries / poison messages.
 - [x] Outbox→Kafka→billing flow **verified end-to-end in Docker** (register → account opened;
       idempotent redelivery = no-op, no DLQ).
-- [x] **Deletion saga** (choreographed): soft-deleting a patient publishes `PatientDeleted` (same
-      outbox; relay dispatches by `event_type`), billing **closes** an empty account / **suspends** a
-      funded one — never a cascade delete, idempotent. All patient events share the ordered
-      `patient-events` topic (see saga convention) so a delete can't overtake its register.
-- [ ] Next: auth-service (JWT/OAuth2) + secure the APIs; then compensating saga leg, CDC (Debezium)
+- [x] **Deletion saga with compensation** (choreographed): soft-deleting a patient publishes
+      `PatientDeleted` (relay dispatches by `event_type`). Billing **closes** an empty account; a
+      **funded** account is **rejected** → billing publishes `PatientDeletionRejected` on
+      `billing-events` → patient-service **restores** the patient. Both directions idempotent; money
+      can't move on a non-`ACTIVE` account (409). All patient events share the ordered `patient-events`
+      topic so a delete can't overtake its register. Services are now both producers and consumers.
+- [ ] Next: auth-service (JWT/OAuth2) + secure the APIs; then orchestrated saga, CDC (Debezium)
       + multi-instance relay locking
 
 **gRPC note:** uses **net.devh `grpc-spring-boot-starter` 3.1.0** on both sides, NOT the official

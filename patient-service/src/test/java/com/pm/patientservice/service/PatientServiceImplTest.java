@@ -1,6 +1,7 @@
 package com.pm.patientservice.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
@@ -250,6 +251,44 @@ class PatientServiceImplTest {
                     .isInstanceOf(PatientNotFoundException.class);
             verify(patientRepository, never()).save(any());
             verify(outboxRepository, never()).save(any());
+        }
+    }
+
+    @Nested
+    @DisplayName("restorePatient (deletion-rejected compensation)")
+    class RestorePatient {
+
+        @Test
+        @DisplayName("restores a soft-deleted patient")
+        void restoresDeleted() {
+            Patient patient = existingPatient();
+            patient.markDeleted();
+            when(patientRepository.findByIdIncludingDeleted(ID)).thenReturn(Optional.of(patient));
+
+            patientService.restorePatient(ID, "billing account has a non-zero balance");
+
+            assertThat(patient.isDeleted()).isFalse();
+            verify(patientRepository).save(patient);
+        }
+
+        @Test
+        @DisplayName("is a no-op when the patient is already live (idempotent redelivery)")
+        void idempotentWhenLive() {
+            Patient patient = existingPatient(); // not deleted
+            when(patientRepository.findByIdIncludingDeleted(ID)).thenReturn(Optional.of(patient));
+
+            patientService.restorePatient(ID, "reason");
+
+            verify(patientRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("is a no-op (no throw) when the patient is unknown")
+        void noOpWhenUnknown() {
+            when(patientRepository.findByIdIncludingDeleted(ID)).thenReturn(Optional.empty());
+
+            assertThatCode(() -> patientService.restorePatient(ID, "reason")).doesNotThrowAnyException();
+            verify(patientRepository, never()).save(any());
         }
     }
 }

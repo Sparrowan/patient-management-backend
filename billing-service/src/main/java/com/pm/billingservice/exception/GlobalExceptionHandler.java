@@ -50,6 +50,13 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         return problem;
     }
 
+    @ExceptionHandler(AccountNotActiveException.class)
+    public ProblemDetail handleAccountNotActive(AccountNotActiveException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
+        problem.setTitle("Account not active");
+        return problem;
+    }
+
     @ExceptionHandler(ObjectOptimisticLockingFailureException.class)
     public ProblemDetail handleOptimisticLock(ObjectOptimisticLockingFailureException ex) {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(

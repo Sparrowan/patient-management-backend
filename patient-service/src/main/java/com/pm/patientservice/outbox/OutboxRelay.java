@@ -43,8 +43,9 @@ public class OutboxRelay {
 
     private final OutboxEventRepository outboxRepository;
     // Object value type: the relay publishes more than one Avro record type (PatientRegistered,
-    // PatientDeleted). KafkaAvroSerializer serializes any SpecificRecord.
-    private final KafkaTemplate<String, Object> kafkaTemplate;
+    // PatientDeleted). KafkaAvroSerializer serializes any SpecificRecord. Injected by name (there
+    // are other KafkaTemplate<String,Object> beans for the consumer DLQ).
+    private final KafkaTemplate<String, Object> patientEventsKafkaTemplate;
     private final ObjectMapper objectMapper;
 
     @Scheduled(fixedDelayString = "${outbox.relay.poll-interval-ms:1000}")
@@ -76,7 +77,7 @@ public class OutboxRelay {
             case OutboxEvent.PATIENT_DELETED -> toDeleted(event.getPayload());
             default -> throw new IllegalStateException("Unknown outbox event type: " + event.getEventType());
         };
-        kafkaTemplate.send(event.getTopic(), event.getAggregateId().toString(), record)
+        patientEventsKafkaTemplate.send(event.getTopic(), event.getAggregateId().toString(), record)
                 .get(SEND_TIMEOUT_SECONDS, TimeUnit.SECONDS);
     }
 

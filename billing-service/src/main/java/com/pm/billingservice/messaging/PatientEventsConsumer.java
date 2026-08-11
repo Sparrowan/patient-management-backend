@@ -11,6 +11,7 @@ import org.springframework.stereotype.Component;
 import com.pm.billingservice.dto.BillingAccountResponseDTO;
 import com.pm.billingservice.dto.OpenAccountRequestDTO;
 import com.pm.billingservice.exception.AccountAlreadyExistsException;
+import com.pm.billingservice.exception.AccountHasBalanceException;
 import com.pm.billingservice.exception.BillingAccountNotFoundException;
 import com.pm.billingservice.service.BillingAccountService;
 import com.pm.events.PatientDeleted;
@@ -38,6 +39,7 @@ public class PatientEventsConsumer {
     private static final Logger log = LoggerFactory.getLogger(PatientEventsConsumer.class);
 
     private final BillingAccountService accountService;
+    private final BillingEventsPublisher billingEventsPublisher;
 
     @KafkaHandler
     public void onPatientRegistered(PatientRegistered event) {
@@ -60,6 +62,12 @@ public class PatientEventsConsumer {
                     patientId, account.status(), event.getEventId());
         } catch (BillingAccountNotFoundException e) {
             log.info("No billing account for deleted patient {} — nothing to deactivate (event {})",
+                    patientId, event.getEventId());
+        } catch (AccountHasBalanceException e) {
+            // Compensation: a patient with a funded account can't be deleted. Ask patient-service to
+            // restore the patient (the balance must be settled first).
+            billingEventsPublisher.publishDeletionRejected(patientId, "billing account has a non-zero balance");
+            log.info("Rejected deletion of patient {} — funded account; published compensation (event {})",
                     patientId, event.getEventId());
         }
     }

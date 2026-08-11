@@ -7,6 +7,8 @@ import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import com.pm.billingservice.exception.AccountHasBalanceException;
+import com.pm.billingservice.exception.AccountNotActiveException;
 import com.pm.billingservice.exception.InsufficientFundsException;
 import jakarta.persistence.Table;
 import java.math.BigDecimal;
@@ -63,13 +65,15 @@ public class BillingAccount extends BaseEntity {
         return new BillingAccount(patientId, currency);
     }
 
-    /** Adds funds to the balance. Amount must be positive. */
+    /** Adds funds to the balance. Amount must be positive; the account must be active. */
     public void credit(BigDecimal amount) {
+        requireActive();
         this.balance = this.balance.add(requirePositive(amount));
     }
 
-    /** Removes funds from the balance. Fails if the balance would go negative. */
+    /** Removes funds from the balance. Fails if inactive, or if the balance would go negative. */
     public void debit(BigDecimal amount) {
+        requireActive();
         requirePositive(amount);
         if (this.balance.compareTo(amount) < 0) {
             throw new InsufficientFundsException(this.id, this.balance, amount);
@@ -77,18 +81,28 @@ public class BillingAccount extends BaseEntity {
         this.balance = this.balance.subtract(amount);
     }
 
+    /** Money only moves on an ACTIVE account — a closed/suspended account is frozen. */
+    private void requireActive() {
+        if (status != AccountStatus.ACTIVE) {
+            throw new AccountNotActiveException(id, status);
+        }
+    }
+
     /**
-     * Deactivates the account when its patient is removed. A funded account is never silently
-     * dropped: it is {@link AccountStatus#CLOSED} only when empty, otherwise
-     * {@link AccountStatus#SUSPENDED} pending settlement of the remaining balance (a real bank rule
-     * — you cannot close an account that still holds money). Idempotent: a no-op once the account is
-     * already closed or suspended, so a redelivered {@code PatientDeleted} event changes nothing.
+     * Deactivates the account when its patient is removed. You cannot close an account that still
+     * holds money (a real bank rule): a funded account throws {@link AccountHasBalanceException},
+     * which the deletion saga turns into a compensating {@code PatientDeletionRejected} (the patient
+     * is then restored). An empty account is {@link AccountStatus#CLOSED}. Idempotent: a no-op once
+     * already closed, so a redelivered {@code PatientDeleted} changes nothing.
      */
     public void deactivate() {
-        if (status == AccountStatus.CLOSED || status == AccountStatus.SUSPENDED) {
+        if (status == AccountStatus.CLOSED) {
             return;
         }
-        this.status = balance.signum() == 0 ? AccountStatus.CLOSED : AccountStatus.SUSPENDED;
+        if (balance.signum() != 0) {
+            throw new AccountHasBalanceException(id, balance);
+        }
+        this.status = AccountStatus.CLOSED;
     }
 
     private static BigDecimal requirePositive(BigDecimal amount) {
