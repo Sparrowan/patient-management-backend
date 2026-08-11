@@ -12,6 +12,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.pm.events.PatientDeleted;
 import com.pm.events.PatientRegistered;
 import com.pm.patientservice.model.OutboxEvent;
 import com.pm.patientservice.repository.OutboxEventRepository;
@@ -41,7 +42,9 @@ public class OutboxRelay {
     private static final long SEND_TIMEOUT_SECONDS = 5;
 
     private final OutboxEventRepository outboxRepository;
-    private final KafkaTemplate<String, PatientRegistered> kafkaTemplate;
+    // Object value type: the relay publishes more than one Avro record type (PatientRegistered,
+    // PatientDeleted). KafkaAvroSerializer serializes any SpecificRecord.
+    private final KafkaTemplate<String, Object> kafkaTemplate;
     private final ObjectMapper objectMapper;
 
     @Scheduled(fixedDelayString = "${outbox.relay.poll-interval-ms:1000}")
@@ -61,20 +64,38 @@ public class OutboxRelay {
     }
 
     /**
-     * Maps the stored JSON payload to the Avro record and sends it, keyed by {@code patientId} so
-     * all events for one patient share a partition (ordering). Blocks on the broker ack so a
-     * failure is caught here rather than escaping asynchronously.
+     * Maps the stored JSON payload to the right Avro record (by event type) and sends it to the
+     * single patient-events topic, keyed by {@code patientId} (the aggregate id). One topic + one
+     * key ⇒ one partition ⇒ strict order, so a delete can never overtake its register (splitting
+     * these across topics would break that — Kafka orders only within a topic-partition). Blocks on
+     * the broker ack so a failure is caught here rather than escaping asynchronously.
      */
     private void publish(OutboxEvent event) throws Exception {
-        PatientRegisteredPayload p =
-                objectMapper.readValue(event.getPayload(), PatientRegisteredPayload.class);
-        PatientRegistered record = PatientRegistered.newBuilder()
+        Object record = switch (event.getEventType()) {
+            case OutboxEvent.PATIENT_REGISTERED -> toRegistered(event.getPayload());
+            case OutboxEvent.PATIENT_DELETED -> toDeleted(event.getPayload());
+            default -> throw new IllegalStateException("Unknown outbox event type: " + event.getEventType());
+        };
+        kafkaTemplate.send(event.getTopic(), event.getAggregateId().toString(), record)
+                .get(SEND_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+    }
+
+    private PatientRegistered toRegistered(String payloadJson) throws Exception {
+        PatientRegisteredPayload p = objectMapper.readValue(payloadJson, PatientRegisteredPayload.class);
+        return PatientRegistered.newBuilder()
                 .setEventId(p.eventId())
                 .setPatientId(p.patientId())
                 .setCurrency(p.currency())
                 .setOccurredAt(Instant.ofEpochMilli(p.occurredAt()))
                 .build();
-        kafkaTemplate.send(event.getTopic(), p.patientId(), record)
-                .get(SEND_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+    }
+
+    private PatientDeleted toDeleted(String payloadJson) throws Exception {
+        PatientDeletedPayload p = objectMapper.readValue(payloadJson, PatientDeletedPayload.class);
+        return PatientDeleted.newBuilder()
+                .setEventId(p.eventId())
+                .setPatientId(p.patientId())
+                .setOccurredAt(Instant.ofEpochMilli(p.occurredAt()))
+                .build();
     }
 }

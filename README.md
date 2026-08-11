@@ -22,12 +22,12 @@ than a shared multi-module build.
       │   planned    │  │  REST :4000   │        │  REST :4001   │
       └──────────────┘  └──────┬────────┘        │  gRPC :9001   │ (sync API, mTLS)
                                │                 └───────▲───────┘
-              register → transactional outbox            │  @KafkaListener
-                               │  PatientRegistered      │  opens the account (idempotent)
-                               ▼  (Avro)                 │
-                        ┌──────────────────────────────────────┐
+        register / delete → transactional outbox          │  @KafkaListener (@KafkaHandler/type)
+                               │  Patient{Registered,     │  register → open account
+                               ▼  Deleted}  (Avro)        │  delete → close/suspend account
+                        ┌──────────────────────────────────────┐   (both idempotent)
                         │  Kafka  (KRaft)  +  Schema Registry   │  kafka-ui :8080
-                        │  topic: patient.registered  (+ .DLT)  │
+                        │  topic: patient-events  (+ .DLT)      │  one ordered stream per patient
                         └──────────────────────────────────────┘
 
   each service ──▶ its own MariaDB database
@@ -97,9 +97,11 @@ http://localhost:4001/swagger-ui.html      http://localhost:4001/actuator/health
 
 **End-to-end check:** `POST /api/v1/patients` on :4000 registers a patient. In the *same*
 transaction an event is written to the `outbox_events` table; the `OutboxRelay` publishes it to the
-Kafka topic `patient.registered` (Avro), and billing-service consumes it and opens the account —
-**guaranteed** (survives a billing outage) and **idempotent** (a redelivery is a no-op). Watch it in
-kafka-ui at `http://localhost:8080`.
+Kafka topic `patient-events` (Avro), and billing-service consumes it and opens the account —
+**guaranteed** (survives a billing outage) and **idempotent** (a redelivery is a no-op). Deleting the
+patient (`DELETE /api/v1/patients/{id}`) publishes `PatientDeleted` to the *same* ordered topic, and
+billing **closes** the account (or **suspends** it if funded). Watch it all in kafka-ui at
+`http://localhost:8080`.
 
 ### Running a single service locally (no Docker)
 

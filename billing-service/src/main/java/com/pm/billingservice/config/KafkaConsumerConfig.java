@@ -21,8 +21,8 @@ import io.confluent.kafka.serializers.AbstractKafkaSchemaSerDeConfig;
 import io.confluent.kafka.serializers.KafkaAvroSerializer;
 
 /**
- * Consumer resilience for the {@code patient.registered} listener: retry a few times, then route
- * the record to a dead-letter topic ({@code patient.registered.DLT}) instead of blocking the
+ * Consumer resilience for the {@code patient-events} listener: retry a few times, then route
+ * the record to a dead-letter topic ({@code patient-events.DLT}) instead of blocking the
  * partition forever on a poison message. Boot wires this {@link DefaultErrorHandler} into the
  * listener container automatically (it's the single {@code CommonErrorHandler} bean).
  *

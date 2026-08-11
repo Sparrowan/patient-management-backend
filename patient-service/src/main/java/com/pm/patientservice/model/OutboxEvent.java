@@ -29,8 +29,13 @@ import lombok.Getter;
 public class OutboxEvent {
 
     private static final String PATIENT_AGGREGATE = "Patient";
-    private static final String PATIENT_REGISTERED = "PatientRegistered";
-    private static final String PATIENT_REGISTERED_TOPIC = "patient.registered";
+    /** Event-type discriminators — the relay switches on these to build the right Avro record. */
+    public static final String PATIENT_REGISTERED = "PatientRegistered";
+    public static final String PATIENT_DELETED = "PatientDeleted";
+    // ONE topic for all patient lifecycle events, keyed by patientId. Kafka guarantees order only
+    // within a topic-partition, so splitting register/delete across topics would let a delete
+    // overtake its register (verified — it does). One ordered stream per patient prevents that.
+    private static final String PATIENT_EVENTS_TOPIC = "patient-events";
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
@@ -78,7 +83,13 @@ public class OutboxEvent {
     /** Records the intent to publish a {@code PatientRegistered} event for the given patient. */
     public static OutboxEvent forPatientRegistered(UUID patientId, String payloadJson) {
         return new OutboxEvent(
-                PATIENT_AGGREGATE, patientId, PATIENT_REGISTERED, PATIENT_REGISTERED_TOPIC, payloadJson);
+                PATIENT_AGGREGATE, patientId, PATIENT_REGISTERED, PATIENT_EVENTS_TOPIC, payloadJson);
+    }
+
+    /** Records the intent to publish a {@code PatientDeleted} event for the given patient. */
+    public static OutboxEvent forPatientDeleted(UUID patientId, String payloadJson) {
+        return new OutboxEvent(
+                PATIENT_AGGREGATE, patientId, PATIENT_DELETED, PATIENT_EVENTS_TOPIC, payloadJson);
     }
 
     /** Marks the event as delivered to the broker (relay stamps this on a successful send). */

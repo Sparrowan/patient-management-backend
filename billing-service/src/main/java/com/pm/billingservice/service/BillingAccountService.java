@@ -40,4 +40,13 @@ public interface BillingAccountService {
 
     /** Returns the account's ledger (money-movement history), newest first. */
     PagedResponse<LedgerEntryResponseDTO> getLedger(UUID accountId, Pageable pageable);
+
+    /**
+     * Deactivates a patient's account when the patient is deleted (a cross-service saga step):
+     * closes it if empty, otherwise suspends it pending settlement — financial history is never
+     * deleted. Idempotent.
+     *
+     * @throws com.pm.billingservice.exception.BillingAccountNotFoundException if the patient has none
+     */
+    BillingAccountResponseDTO deactivateForPatient(UUID patientId);
 }

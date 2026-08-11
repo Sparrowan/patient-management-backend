@@ -9,6 +9,7 @@ import com.pm.patientservice.exception.PatientNotFoundException;
 import com.pm.patientservice.mapper.PatientMapper;
 import com.pm.patientservice.model.OutboxEvent;
 import com.pm.patientservice.model.Patient;
+import com.pm.patientservice.outbox.PatientDeletedPayload;
 import com.pm.patientservice.outbox.PatientRegisteredPayload;
 import com.pm.patientservice.repository.OutboxEventRepository;
 import com.pm.patientservice.repository.PatientRepository;
@@ -75,6 +76,17 @@ public class PatientServiceImpl implements PatientService {
         }
     }
 
+    /** Serializes the {@code PatientDeleted} payload stored in the outbox row (ids only, no PHI). */
+    private String deletedPayload(UUID patientId) {
+        PatientDeletedPayload payload = new PatientDeletedPayload(
+                UUID.randomUUID().toString(), patientId.toString(), Instant.now().toEpochMilli());
+        try {
+            return objectMapper.writeValueAsString(payload);
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("Failed to serialize PatientDeleted payload", e);
+        }
+    }
+
     @Override
     @Transactional
     public PatientResponseDTO updatePatient(UUID id, PatientUpdateRequestDTO request) {
@@ -101,6 +113,9 @@ public class PatientServiceImpl implements PatientService {
         Patient patient = findByIdOrThrow(id);
         patient.markDeleted();
         patientRepository.save(patient);
+        // Saga: announce the deletion (same-transaction outbox write) so billing applies its own
+        // rule — close/suspend the account — rather than a cross-service cascade delete.
+        outboxRepository.save(OutboxEvent.forPatientDeleted(id, deletedPayload(id)));
     }
 
     private Patient findByIdOrThrow(UUID id) {

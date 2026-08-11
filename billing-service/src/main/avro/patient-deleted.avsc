@@ -1,0 +1,11 @@
+{
+  "namespace": "com.pm.events",
+  "type": "record",
+  "name": "PatientDeleted",
+  "doc": "Emitted when a patient is (soft) deleted. Identifiers only — never PHI. Consumers react with their own business rules (e.g. billing closes/suspends the account); this is not a cascade delete.",
+  "fields": [
+    { "name": "eventId",    "type": "string", "doc": "Unique event id (UUID). The consumer's idempotency key." },
+    { "name": "patientId",  "type": "string", "doc": "The deleted patient's id (UUID)." },
+    { "name": "occurredAt", "type": { "type": "long", "logicalType": "timestamp-millis" }, "doc": "When the deletion committed." }
+  ]
+}

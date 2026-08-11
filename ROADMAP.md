@@ -93,12 +93,16 @@ cross-reference the backend-patterns catalog we're prioritizing for banking/fint
 - [x] **Kafka** (KRaft) + **Schema Registry** (Avro) + **Outbox pattern** + **idempotent consumers**
       + **DLQ** — registering a patient publishes `PatientRegistered` via a transactional outbox
       (`outbox_events` + `@Scheduled OutboxRelay`, at-least-once); `billing` consumes it and opens the
-      account idempotently (duplicate → success), with `patient.registered.DLT` for poison/exhausted
+      account idempotently (duplicate → success), with `patient-events.DLT` for poison/exhausted
       records. Replaced the best-effort gRPC trigger. **kafka-ui** on `:8080` for inspection. `[#55/#52]`
   - Still to layer on: **CDC (Debezium)** to replace the polling relay; **multi-instance relay
     safety** (`SELECT … FOR UPDATE SKIP LOCKED` or ShedLock — ties into Distributed locks below);
     an **outbox reaper** (purge/alert on old published/failed rows).
-- [ ] **Saga pattern** for cross-service transactions (transfer = debit + credit). `[#56]`
+- [~] **Saga pattern** for cross-service transactions. First step done: **choreographed** deletion
+      saga — soft-deleting a patient publishes `PatientDeleted` (same outbox), billing reacts with a
+      business rule (empty → `CLOSED`, funded → `SUSPENDED` pending settlement; never a cascade
+      delete), idempotently. Still to add: the **compensating** leg (billing *rejects* → patient
+      un-deletes) and an **orchestrated** saga (transfer = debit + credit with rollback). `[#56]`
 - [x] **Immutable ledger** for billing — append-only `ledger_entries` (each money movement with
       `balanceAfter`); full event-sourcing/double-entry is a later evolution. `[#53]`
 - [ ] **CDC streaming** for reconciliation/reporting. `[#99]`

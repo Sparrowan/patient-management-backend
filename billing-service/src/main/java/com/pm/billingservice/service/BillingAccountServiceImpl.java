@@ -75,6 +75,16 @@ public class BillingAccountServiceImpl implements BillingAccountService {
     }
 
     @Override
+    @Transactional
+    public BillingAccountResponseDTO deactivateForPatient(UUID patientId) {
+        BillingAccount account = accountRepository
+                .findByPatientId(patientId)
+                .orElseThrow(() -> new BillingAccountNotFoundException(patientId));
+        account.deactivate();
+        return accountMapper.toResponse(accountRepository.save(account));
+    }
+
+    @Override
     @Transactional(readOnly = true)
     public PagedResponse<LedgerEntryResponseDTO> getLedger(UUID accountId, Pageable pageable) {
         if (!accountRepository.existsById(accountId)) {

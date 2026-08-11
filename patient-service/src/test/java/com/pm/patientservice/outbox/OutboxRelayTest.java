@@ -8,6 +8,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.pm.events.PatientDeleted;
 import com.pm.events.PatientRegistered;
 import com.pm.patientservice.model.OutboxEvent;
 import com.pm.patientservice.repository.OutboxEventRepository;
@@ -33,10 +34,10 @@ import org.springframework.kafka.support.SendResult;
 class OutboxRelayTest {
 
     private static final UUID PATIENT_ID = UUID.fromString("22222222-2222-2222-2222-222222222222");
-    private static final String TOPIC = "patient.registered";
+    private static final String TOPIC = "patient-events";
 
     @Mock private OutboxEventRepository outboxRepository;
-    @Mock private KafkaTemplate<String, PatientRegistered> kafkaTemplate;
+    @Mock private KafkaTemplate<String, Object> kafkaTemplate;
     @Spy private ObjectMapper objectMapper = new ObjectMapper();
     @InjectMocks private OutboxRelay relay;
 
@@ -46,12 +47,18 @@ class OutboxRelayTest {
         return OutboxEvent.forPatientRegistered(PATIENT_ID, payload);
     }
 
+    private OutboxEvent pendingDeletedEvent() throws Exception {
+        String payload = objectMapper.writeValueAsString(new PatientDeletedPayload(
+                UUID.randomUUID().toString(), PATIENT_ID.toString(), 1_700_000_000_000L));
+        return OutboxEvent.forPatientDeleted(PATIENT_ID, payload);
+    }
+
     @Test
     @DisplayName("publishes an unpublished event keyed by patientId and marks it published")
     void publishesAndMarks() throws Exception {
         OutboxEvent event = pendingEvent();
         when(outboxRepository.findTop100ByPublishedAtIsNullOrderByCreatedAtAsc()).thenReturn(List.of(event));
-        CompletableFuture<SendResult<String, PatientRegistered>> ok = CompletableFuture.completedFuture(null);
+        CompletableFuture<SendResult<String, Object>> ok = CompletableFuture.completedFuture(null);
         when(kafkaTemplate.send(eq(TOPIC), eq(PATIENT_ID.toString()), any(PatientRegistered.class)))
                 .thenReturn(ok);
 
@@ -63,11 +70,26 @@ class OutboxRelayTest {
     }
 
     @Test
+    @DisplayName("routes a PatientDeleted row to the patient-events topic as a PatientDeleted record")
+    void publishesDeletedEvent() throws Exception {
+        OutboxEvent event = pendingDeletedEvent();
+        when(outboxRepository.findTop100ByPublishedAtIsNullOrderByCreatedAtAsc()).thenReturn(List.of(event));
+        CompletableFuture<SendResult<String, Object>> ok = CompletableFuture.completedFuture(null);
+        when(kafkaTemplate.send(eq("patient-events"), eq(PATIENT_ID.toString()), any(PatientDeleted.class)))
+                .thenReturn(ok);
+
+        relay.publishPending();
+
+        assertThat(event.isPublished()).isTrue();
+        verify(kafkaTemplate).send(eq("patient-events"), eq(PATIENT_ID.toString()), any(PatientDeleted.class));
+    }
+
+    @Test
     @DisplayName("on a broker failure, leaves the event unpublished and records the attempt")
     void recordsFailure() throws Exception {
         OutboxEvent event = pendingEvent();
         when(outboxRepository.findTop100ByPublishedAtIsNullOrderByCreatedAtAsc()).thenReturn(List.of(event));
-        CompletableFuture<SendResult<String, PatientRegistered>> failed = new CompletableFuture<>();
+        CompletableFuture<SendResult<String, Object>> failed = new CompletableFuture<>();
         failed.completeExceptionally(new RuntimeException("broker down"));
         when(kafkaTemplate.send(anyString(), anyString(), any(PatientRegistered.class))).thenReturn(failed);
 

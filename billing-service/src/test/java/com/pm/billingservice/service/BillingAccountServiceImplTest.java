@@ -246,4 +246,55 @@ class BillingAccountServiceImplTest {
             assertThat(result.content()).containsExactly(response());
         }
     }
+
+    @Nested
+    @DisplayName("deactivateForPatient")
+    class DeactivateForPatient {
+
+        // Reflect the entity's post-deactivation status back through the (mocked) mapper.
+        private void stubMapper(BillingAccount account) {
+            when(accountRepository.findByPatientId(PATIENT_ID)).thenReturn(Optional.of(account));
+            when(accountRepository.save(account)).thenReturn(account);
+            when(accountMapper.toResponse(account)).thenAnswer(inv -> {
+                BillingAccount a = inv.getArgument(0);
+                return new BillingAccountResponseDTO(
+                        ACCOUNT_ID, PATIENT_ID, a.getStatus(), a.getBalance(), a.getCurrency(), 0L);
+            });
+        }
+
+        @Test
+        @DisplayName("closes an empty account")
+        void closesEmptyAccount() {
+            BillingAccount account = BillingAccount.openFor(PATIENT_ID, "USD"); // balance 0, ACTIVE
+            stubMapper(account);
+
+            BillingAccountResponseDTO result = service.deactivateForPatient(PATIENT_ID);
+
+            assertThat(account.getStatus()).isEqualTo(AccountStatus.CLOSED);
+            assertThat(result.status()).isEqualTo(AccountStatus.CLOSED);
+        }
+
+        @Test
+        @DisplayName("suspends a funded account (funds settled before closure)")
+        void suspendsFundedAccount() {
+            BillingAccount account = BillingAccount.openFor(PATIENT_ID, "USD");
+            account.credit(new BigDecimal("10.00"));
+            stubMapper(account);
+
+            BillingAccountResponseDTO result = service.deactivateForPatient(PATIENT_ID);
+
+            assertThat(account.getStatus()).isEqualTo(AccountStatus.SUSPENDED);
+            assertThat(result.status()).isEqualTo(AccountStatus.SUSPENDED);
+        }
+
+        @Test
+        @DisplayName("throws when the patient has no account")
+        void throwsWhenMissing() {
+            when(accountRepository.findByPatientId(PATIENT_ID)).thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> service.deactivateForPatient(PATIENT_ID))
+                    .isInstanceOf(BillingAccountNotFoundException.class);
+            verify(accountRepository, never()).save(any());
+        }
+    }
 }

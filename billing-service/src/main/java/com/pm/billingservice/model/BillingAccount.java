@@ -77,6 +77,20 @@ public class BillingAccount extends BaseEntity {
         this.balance = this.balance.subtract(amount);
     }
 
+    /**
+     * Deactivates the account when its patient is removed. A funded account is never silently
+     * dropped: it is {@link AccountStatus#CLOSED} only when empty, otherwise
+     * {@link AccountStatus#SUSPENDED} pending settlement of the remaining balance (a real bank rule
+     * — you cannot close an account that still holds money). Idempotent: a no-op once the account is
+     * already closed or suspended, so a redelivered {@code PatientDeleted} event changes nothing.
+     */
+    public void deactivate() {
+        if (status == AccountStatus.CLOSED || status == AccountStatus.SUSPENDED) {
+            return;
+        }
+        this.status = balance.signum() == 0 ? AccountStatus.CLOSED : AccountStatus.SUSPENDED;
+    }
+
     private static BigDecimal requirePositive(BigDecimal amount) {
         if (amount == null || amount.signum() <= 0) {
             throw new IllegalArgumentException("Amount must be positive: " + amount);

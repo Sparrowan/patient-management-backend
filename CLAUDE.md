@@ -190,6 +190,17 @@ com.pm.<service>/
   → `<topic>.DLT` after a bounded retry. `ErrorHandlingDeserializer` wraps the Avro deserializer so
   an undeserializable record is dead-lettered immediately (non-retryable) instead of jamming the
   partition. The recoverer routes by value type (Avro object vs raw bytes) via a two-template map.
+- **Cross-service consistency = choreographed sagas, never cascade deletes**: ACID stops at the
+  service boundary (separate DBs, no cross-DB FK). A change that affects another aggregate is
+  published as an event; the consumer applies its **own business rule**, not a mirror of the
+  producer's action. Deleting a patient publishes `PatientDeleted`; billing **closes** an empty
+  account or **suspends** a funded one (funds settle before closure) — financial history is never
+  deleted. **Ordering:** all of an aggregate's lifecycle events share **one topic** keyed by the
+  aggregate id (`patient-events`) — Kafka orders only within a topic-partition, so split across
+  topics a delete can overtake its register (verified). The relay dispatches by `event_type` (one
+  outbox → the right Avro record, all to the one topic); the consumer is a class-level
+  `@KafkaListener` with a `@KafkaHandler` per type; multiple schemas on one topic need
+  `TopicRecordNameStrategy`. The **compensating** leg (consumer rejects → producer reverses) is next.
 
 ## Build & run
 
@@ -242,9 +253,15 @@ compilation problems` / `No qualifying bean of type PatientMapper` at startup). 
       **kafka-ui**. Registering a patient now publishes `PatientRegistered` via the **Transactional
       Outbox** (`outbox_events` + `@Scheduled OutboxRelay`, at-least-once); `billing` consumes it
       (`@KafkaListener`), opens the account **idempotently** (duplicate → success, no DLQ), with a
-      **DLQ** (`patient.registered.DLT`) on exhausted retries / poison messages.
-- [ ] Next: end-to-end Docker verification of the outbox→Kafka→billing flow; then CDC (Debezium)
-      + multi-instance relay locking; Saga for cross-service transactions
+      **DLQ** (`patient-events.DLT`) on exhausted retries / poison messages.
+- [x] Outbox→Kafka→billing flow **verified end-to-end in Docker** (register → account opened;
+      idempotent redelivery = no-op, no DLQ).
+- [x] **Deletion saga** (choreographed): soft-deleting a patient publishes `PatientDeleted` (same
+      outbox; relay dispatches by `event_type`), billing **closes** an empty account / **suspends** a
+      funded one — never a cascade delete, idempotent. All patient events share the ordered
+      `patient-events` topic (see saga convention) so a delete can't overtake its register.
+- [ ] Next: auth-service (JWT/OAuth2) + secure the APIs; then compensating saga leg, CDC (Debezium)
+      + multi-instance relay locking
 
 **gRPC note:** uses **net.devh `grpc-spring-boot-starter` 3.1.0** on both sides, NOT the official
 `org.springframework.grpc` — its only published Boot starter (1.0.3) is binary-incompatible with

@@ -143,7 +143,7 @@ class PatientServiceImplTest {
             verify(outboxRepository).save(outbox.capture());
             assertThat(outbox.getValue().getAggregateId()).isEqualTo(ID);
             assertThat(outbox.getValue().getEventType()).isEqualTo("PatientRegistered");
-            assertThat(outbox.getValue().getTopic()).isEqualTo("patient.registered");
+            assertThat(outbox.getValue().getTopic()).isEqualTo("patient-events");
             assertThat(outbox.getValue().getPayload()).contains(ID.toString()).doesNotContain("ada@example.com");
         }
 
@@ -232,6 +232,13 @@ class PatientServiceImplTest {
             assertThat(patient.isDeleted()).isTrue();
             assertThat(patient.getDeletedAt()).isNotNull();
             verify(patientRepository).save(patient);
+
+            // Saga: the deletion is announced via the outbox in the same flow.
+            ArgumentCaptor<OutboxEvent> outbox = ArgumentCaptor.forClass(OutboxEvent.class);
+            verify(outboxRepository).save(outbox.capture());
+            assertThat(outbox.getValue().getEventType()).isEqualTo("PatientDeleted");
+            assertThat(outbox.getValue().getAggregateId()).isEqualTo(ID);
+            assertThat(outbox.getValue().getTopic()).isEqualTo("patient-events");
         }
 
         @Test
@@ -242,6 +249,7 @@ class PatientServiceImplTest {
             assertThatThrownBy(() -> patientService.deletePatient(ID))
                     .isInstanceOf(PatientNotFoundException.class);
             verify(patientRepository, never()).save(any());
+            verify(outboxRepository, never()).save(any());
         }
     }
 }
