@@ -6,6 +6,7 @@ import com.pm.patientservice.dto.PatientResponseDTO;
 import com.pm.patientservice.dto.PatientUpdateRequestDTO;
 import com.pm.patientservice.exception.EmailAlreadyExistsException;
 import com.pm.patientservice.exception.PatientNotFoundException;
+import com.pm.patientservice.grpc.BillingGrpcClient;
 import com.pm.patientservice.mapper.PatientMapper;
 import com.pm.patientservice.model.OutboxEvent;
 import com.pm.patientservice.model.Patient;
@@ -18,8 +19,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Pageable;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
@@ -29,8 +28,6 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class PatientServiceImpl implements PatientService {
 
-    private static final Logger log = LoggerFactory.getLogger(PatientServiceImpl.class);
-
     /** Currency for a new patient's billing account until per-patient currency exists. */
     private static final String DEFAULT_CURRENCY = "USD";
 
@@ -38,6 +35,7 @@ public class PatientServiceImpl implements PatientService {
     private final PatientMapper patientMapper;
     private final OutboxEventRepository outboxRepository;
     private final ObjectMapper objectMapper;
+    private final BillingGrpcClient billingGrpcClient;
 
     @Override
     @Transactional(readOnly = true)
@@ -113,31 +111,16 @@ public class PatientServiceImpl implements PatientService {
     @Override
     @Transactional
     public void deletePatient(UUID id) {
-        // Soft delete: load (already-deleted rows are filtered out → 404), mark, and persist.
-        Patient patient = findByIdOrThrow(id);
+        Patient patient = findByIdOrThrow(id); // 404 if unknown/already deleted
+        // Synchronous veto (mTLS gRPC): billing closes an empty account, or rejects → 409 if it
+        // still holds funds, or 503 if it's unreachable. Runs BEFORE the soft-delete, so a rejection
+        // leaves the patient untouched — an immediate, correct answer with no delete/restore flip-flop.
+        billingGrpcClient.closeAccountForPatient(id);
         patient.markDeleted();
         patientRepository.save(patient);
-        // Saga: announce the deletion (same-transaction outbox write) so billing applies its own
-        // rule — close/suspend the account — rather than a cross-service cascade delete.
+        // Fan-out only: announce the deletion for other consumers (analytics/audit/future). Billing
+        // already closed the account synchronously above, so for billing this event is a no-op.
         outboxRepository.save(OutboxEvent.forPatientDeleted(id, deletedPayload(id)));
-    }
-
-    @Override
-    @Transactional
-    public void restorePatient(UUID id, String reason) {
-        // Load including soft-deleted rows (@SQLRestriction hides them from normal queries).
-        patientRepository.findByIdIncludingDeleted(id).ifPresentOrElse(
-                patient -> {
-                    if (patient.isDeleted()) {
-                        patient.restore();
-                        patientRepository.save(patient);
-                        log.info("Restored patient {} after billing rejected deletion: {}", id, reason);
-                    } else {
-                        // Idempotent: a redelivered rejection for an already-live patient.
-                        log.info("Patient {} already live — restore is a no-op (reason: {})", id, reason);
-                    }
-                },
-                () -> log.warn("Cannot restore unknown patient {} (reason: {})", id, reason));
     }
 
     private Patient findByIdOrThrow(UUID id) {

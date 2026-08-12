@@ -43,15 +43,11 @@ public interface PatientService {
     PatientResponseDTO updatePatient(UUID id, PatientUpdateRequestDTO request);
 
     /**
-     * Deletes a patient.
+     * Deletes a patient. Billing is asked synchronously (gRPC) to close the account first; the
+     * deletion is vetoed if the account still holds funds.
      *
      * @throws com.pm.patientservice.exception.PatientNotFoundException if none exists
+     * @throws com.pm.patientservice.exception.PatientDeletionConflictException if the account is funded
      */
     void deletePatient(UUID id);
-
-    /**
-     * Restores a soft-deleted patient — the compensating action when billing rejects the deletion.
-     * Idempotent: a no-op if the patient is already live or not found. {@code reason} is logged.
-     */
-    void restorePatient(UUID id, String reason);
 }

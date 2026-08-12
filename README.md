@@ -17,24 +17,26 @@ than a shared multi-module build.
                          └──────┬──────┘
              ┌──────────────────┼──────────────────┐
              ▼                  ▼                  ▼
-   ┌──────────────┐   patient-events  (ordered, Avro)      ┌───────────────┐
-   │ auth-service │   register → open account              │billing-service│
-   │   planned    │   ┌───────────────┐ ───────────────▶   │  REST :4001   │
-   └──────────────┘   │patient-service│   delete → close   │  gRPC :9001   │ (sync API, mTLS)
-                      │  REST :4000   │   (empty) / REJECT  │  producer +   │
-                      │  producer +   │   (funded)          │  consumer     │
-                      │  consumer     │ ◀───────────────    └───────────────┘
-                      └───────────────┘   billing-events
-                        restore patient    (compensation: deletion rejected)
+   ┌──────────────┐                                        ┌───────────────┐
+   │ auth-service │   REGISTER  ─ async ─▶  patient-events  │billing-service│
+   │   planned    │   ┌───────────────┐   (outbox, Avro) ─▶ │  REST :4001   │
+   └──────────────┘   │patient-service│                     │  gRPC :9001   │ (mTLS)
+                      │  REST :4000   │   DELETE ─ sync ─▶   │  opens acct   │
+                      │  producer     │   CloseAccountFor-  │  (on register)│
+                      │  + gRPC client│   Patient (veto):   │  closes/vetoes│
+                      └───────────────┘   409 if funded ◀── │  (on delete)  │
+                              │                             └───────────────┘
+                              └─ PatientDeleted (fan-out only, → future consumers)
 
-     all over Kafka (KRaft) + Schema Registry ·  kafka-ui :8080 ·  each topic has a  .DLT
-  each service ──▶ its own MariaDB database
+  REGISTER: async event (guaranteed via outbox), decoupled/resilient.
+  DELETE:   synchronous gRPC veto — immediate 409 if the account is funded (no flip-flop).
+  Kafka (KRaft) + Schema Registry · kafka-ui :8080 · patient-events (+ .DLT) · DB per service
 ```
 
-**Two transports by design:** **Kafka** carries *asynchronous* events — patient registration/deletion
-drives billing (guaranteed via the outbox), and billing's rejection drives a **compensating** restore
-back in patient-service. **gRPC** stays for *synchronous* calls (billing's `OpenAccount` server,
-mTLS-secured, kept for future query-style callers). Both services are producers *and* consumers.
+**Gate synchronously, propagate asynchronously.** The user-facing **veto** (may this patient be
+deleted?) is a **synchronous mTLS gRPC** call — immediate, authoritative, 409 if the account holds
+funds. The **fan-out** (registration opening an account; `PatientDeleted` for analytics/audit) stays
+**asynchronous** over Kafka, guaranteed via the transactional outbox.
 
 ## Tech stack
 
@@ -97,12 +99,13 @@ http://localhost:4001/swagger-ui.html      http://localhost:4001/actuator/health
 **End-to-end check:** `POST /api/v1/patients` on :4000 registers a patient. In the *same*
 transaction an event is written to the `outbox_events` table; the `OutboxRelay` publishes it to the
 Kafka topic `patient-events` (Avro), and billing-service consumes it and opens the account —
-**guaranteed** (survives a billing outage) and **idempotent** (a redelivery is a no-op). Deleting the
-patient (`DELETE /api/v1/patients/{id}`) publishes `PatientDeleted` to the *same* ordered topic:
-billing **closes** an empty account, or — if the account is **funded** — *rejects* the deletion and
-publishes `PatientDeletionRejected`, which patient-service consumes to **restore** the patient (the
-compensating action). So the full loop is: *delete a funded patient → rejected + restored → settle the
-balance → delete again → closed.* Watch it all in kafka-ui at `http://localhost:8080`.
+**guaranteed** (survives a billing outage) and **idempotent** (a redelivery is a no-op).
+
+`DELETE /api/v1/patients/{id}` first makes a **synchronous mTLS gRPC** call to billing
+(`CloseAccountForPatient`): a **funded** account → **409** (settle the balance first, patient *not*
+deleted); an **empty** account → billing closes it and the patient is soft-deleted; billing down →
+**503**. So the loop is: *credit an account → DELETE → 409 → debit to zero → DELETE → 204 (closed).*
+A `PatientDeleted` event is still emitted as fan-out (visible in kafka-ui at `http://localhost:8080`).
 
 ### Running a single service locally (no Docker)
 

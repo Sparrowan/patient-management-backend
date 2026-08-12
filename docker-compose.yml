@@ -117,6 +117,8 @@ services:
         condition: service_healthy
       schema-registry:
         condition: service_healthy
+      billing-service:
+        condition: service_started
     environment:
       # Points at the DB container over the compose network (service name is the hostname).
       DB_URL: jdbc:mariadb://patient-service-db:3306/patient_db
@@ -127,6 +129,8 @@ services:
       # Event backbone (in-network hostnames).
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      # Reach billing's gRPC server (deletion veto) over the compose network.
+      BILLING_GRPC_ADDRESS: static://billing-service:9001
     ports:
       - "4000:4000"
     networks:

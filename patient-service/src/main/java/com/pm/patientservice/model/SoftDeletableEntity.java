@@ -29,9 +29,4 @@ public abstract class SoftDeletableEntity extends BaseEntity {
     public void markDeleted() {
         this.deletedAt = Instant.now();
     }
-
-    /** Reverses a soft delete (compensating action) — clears the timestamp so the row is live again. */
-    public void restore() {
-        this.deletedAt = null;
-    }
 }

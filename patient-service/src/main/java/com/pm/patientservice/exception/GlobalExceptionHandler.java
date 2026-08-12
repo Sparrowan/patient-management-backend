@@ -44,6 +44,21 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         return problem;
     }
 
+    @ExceptionHandler(PatientDeletionConflictException.class)
+    public ProblemDetail handleDeletionConflict(PatientDeletionConflictException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
+        problem.setTitle("Patient cannot be deleted");
+        return problem;
+    }
+
+    @ExceptionHandler(PatientDeletionUnavailableException.class)
+    public ProblemDetail handleDeletionUnavailable(PatientDeletionUnavailableException ex) {
+        ProblemDetail problem =
+                ProblemDetail.forStatusAndDetail(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage());
+        problem.setTitle("Deletion temporarily unavailable");
+        return problem;
+    }
+
     @ExceptionHandler(ObjectOptimisticLockingFailureException.class)
     public ProblemDetail handleOptimisticLock(ObjectOptimisticLockingFailureException ex) {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(

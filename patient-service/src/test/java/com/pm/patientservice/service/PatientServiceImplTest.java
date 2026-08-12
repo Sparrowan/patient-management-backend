@@ -1,9 +1,9 @@
 package com.pm.patientservice.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -14,7 +14,9 @@ import com.pm.patientservice.dto.PatientRequestDTO;
 import com.pm.patientservice.dto.PatientResponseDTO;
 import com.pm.patientservice.dto.PatientUpdateRequestDTO;
 import com.pm.patientservice.exception.EmailAlreadyExistsException;
+import com.pm.patientservice.exception.PatientDeletionConflictException;
 import com.pm.patientservice.exception.PatientNotFoundException;
+import com.pm.patientservice.grpc.BillingGrpcClient;
 import com.pm.patientservice.mapper.PatientMapper;
 import com.pm.patientservice.model.OutboxEvent;
 import com.pm.patientservice.model.Patient;
@@ -54,6 +56,7 @@ class PatientServiceImplTest {
     @Mock private PatientRepository patientRepository;
     @Mock private PatientMapper patientMapper;
     @Mock private OutboxEventRepository outboxRepository;
+    @Mock private BillingGrpcClient billingGrpcClient;
     // Real ObjectMapper (spy) so the outbox payload is actually serialized, as in production.
     @Spy private ObjectMapper objectMapper = new ObjectMapper();
     @InjectMocks private PatientServiceImpl patientService;
@@ -222,19 +225,20 @@ class PatientServiceImplTest {
     class DeletePatient {
 
         @Test
-        @DisplayName("soft-deletes (marks deleted + stamps deletedAt) when the patient exists")
-        void deletesWhenPresent() {
+        @DisplayName("closes the account via the gRPC veto, then soft-deletes + emits the fan-out event")
+        void deletesWhenPresentAndAllowed() {
             Patient patient = existingPatient();
             when(patientRepository.findById(ID)).thenReturn(Optional.of(patient));
             when(patientRepository.save(patient)).thenReturn(patient);
 
             patientService.deletePatient(ID);
 
+            // Synchronous veto runs first, then the soft-delete + fan-out outbox event.
+            verify(billingGrpcClient).closeAccountForPatient(ID);
             assertThat(patient.isDeleted()).isTrue();
             assertThat(patient.getDeletedAt()).isNotNull();
             verify(patientRepository).save(patient);
 
-            // Saga: the deletion is announced via the outbox in the same flow.
             ArgumentCaptor<OutboxEvent> outbox = ArgumentCaptor.forClass(OutboxEvent.class);
             verify(outboxRepository).save(outbox.capture());
             assertThat(outbox.getValue().getEventType()).isEqualTo("PatientDeleted");
@@ -243,52 +247,30 @@ class PatientServiceImplTest {
         }
 
         @Test
-        @DisplayName("throws PatientNotFoundException and never saves when absent")
+        @DisplayName("billing vetoes a funded account → 409, patient not deleted, no event")
+        void vetoRejectsFundedAccount() {
+            Patient patient = existingPatient();
+            when(patientRepository.findById(ID)).thenReturn(Optional.of(patient));
+            doThrow(new PatientDeletionConflictException(ID, "billing account has a non-zero balance"))
+                    .when(billingGrpcClient).closeAccountForPatient(ID);
+
+            assertThatThrownBy(() -> patientService.deletePatient(ID))
+                    .isInstanceOf(PatientDeletionConflictException.class);
+            assertThat(patient.isDeleted()).isFalse();
+            verify(patientRepository, never()).save(any());
+            verify(outboxRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("throws PatientNotFoundException, never calls billing, never saves when absent")
         void throwsWhenMissing() {
             when(patientRepository.findById(ID)).thenReturn(Optional.empty());
 
             assertThatThrownBy(() -> patientService.deletePatient(ID))
                     .isInstanceOf(PatientNotFoundException.class);
+            verify(billingGrpcClient, never()).closeAccountForPatient(any());
             verify(patientRepository, never()).save(any());
             verify(outboxRepository, never()).save(any());
-        }
-    }
-
-    @Nested
-    @DisplayName("restorePatient (deletion-rejected compensation)")
-    class RestorePatient {
-
-        @Test
-        @DisplayName("restores a soft-deleted patient")
-        void restoresDeleted() {
-            Patient patient = existingPatient();
-            patient.markDeleted();
-            when(patientRepository.findByIdIncludingDeleted(ID)).thenReturn(Optional.of(patient));
-
-            patientService.restorePatient(ID, "billing account has a non-zero balance");
-
-            assertThat(patient.isDeleted()).isFalse();
-            verify(patientRepository).save(patient);
-        }
-
-        @Test
-        @DisplayName("is a no-op when the patient is already live (idempotent redelivery)")
-        void idempotentWhenLive() {
-            Patient patient = existingPatient(); // not deleted
-            when(patientRepository.findByIdIncludingDeleted(ID)).thenReturn(Optional.of(patient));
-
-            patientService.restorePatient(ID, "reason");
-
-            verify(patientRepository, never()).save(any());
-        }
-
-        @Test
-        @DisplayName("is a no-op (no throw) when the patient is unknown")
-        void noOpWhenUnknown() {
-            when(patientRepository.findByIdIncludingDeleted(ID)).thenReturn(Optional.empty());
-
-            assertThatCode(() -> patientService.restorePatient(ID, "reason")).doesNotThrowAnyException();
-            verify(patientRepository, never()).save(any());
         }
     }
 }

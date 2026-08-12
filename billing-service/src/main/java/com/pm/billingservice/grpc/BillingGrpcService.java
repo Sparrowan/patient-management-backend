@@ -1,11 +1,15 @@
 package com.pm.billingservice.grpc;
 
 import com.pm.billing.grpc.BillingServiceGrpc;
+import com.pm.billing.grpc.CloseAccountRequest;
+import com.pm.billing.grpc.CloseAccountResponse;
 import com.pm.billing.grpc.OpenAccountRequest;
 import com.pm.billing.grpc.OpenAccountResponse;
 import com.pm.billingservice.dto.BillingAccountResponseDTO;
 import com.pm.billingservice.dto.OpenAccountRequestDTO;
 import com.pm.billingservice.exception.AccountAlreadyExistsException;
+import com.pm.billingservice.exception.AccountHasBalanceException;
+import com.pm.billingservice.exception.BillingAccountNotFoundException;
 import io.grpc.Status;
 import io.grpc.stub.StreamObserver;
 import jakarta.validation.ConstraintViolation;
@@ -61,6 +65,38 @@ public class BillingGrpcService extends BillingServiceGrpc.BillingServiceImplBas
         } catch (AccountAlreadyExistsException e) {
             responseObserver.onError(
                     Status.ALREADY_EXISTS.withDescription(e.getMessage()).asRuntimeException());
+        }
+    }
+
+    /**
+     * Synchronous precondition for deleting a patient: close the account, or reject the deletion if
+     * it still holds funds. Reuses {@link com.pm.billingservice.service.BillingAccountService#deactivateForPatient}.
+     */
+    @Override
+    public void closeAccountForPatient(
+            CloseAccountRequest request, StreamObserver<CloseAccountResponse> responseObserver) {
+        UUID patientId;
+        try {
+            patientId = UUID.fromString(request.getPatientId());
+        } catch (IllegalArgumentException e) {
+            responseObserver.onError(Status.INVALID_ARGUMENT
+                    .withDescription("patientId must be a UUID")
+                    .asRuntimeException());
+            return;
+        }
+
+        try {
+            accountService.deactivateForPatient(patientId);
+            responseObserver.onNext(CloseAccountResponse.newBuilder().setStatus("CLOSED").build());
+            responseObserver.onCompleted();
+        } catch (BillingAccountNotFoundException e) {
+            // No account for this patient (e.g. registration not yet processed) — nothing to close.
+            responseObserver.onNext(CloseAccountResponse.newBuilder().setStatus("NO_ACCOUNT").build());
+            responseObserver.onCompleted();
+        } catch (AccountHasBalanceException e) {
+            // Funded → the patient may not be deleted until settled. The caller maps this to 409.
+            responseObserver.onError(
+                    Status.FAILED_PRECONDITION.withDescription(e.getMessage()).asRuntimeException());
         }
     }
 }

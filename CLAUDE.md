@@ -190,26 +190,31 @@ com.pm.<service>/
   → `<topic>.DLT` after a bounded retry. `ErrorHandlingDeserializer` wraps the Avro deserializer so
   an undeserializable record is dead-lettered immediately (non-retryable) instead of jamming the
   partition. The recoverer routes by value type (Avro object vs raw bytes) via a two-template map.
-- **Cross-service consistency = choreographed sagas, never cascade deletes**: ACID stops at the
-  service boundary (separate DBs, no cross-DB FK). A change that affects another aggregate is
-  published as an event; the consumer applies its **own business rule**, not a mirror of the
-  producer's action. Deleting a patient publishes `PatientDeleted`; billing **closes** an empty
-  account or **suspends** a funded one (funds settle before closure) — financial history is never
-  deleted. **Ordering:** all of an aggregate's lifecycle events share **one topic** keyed by the
-  aggregate id (`patient-events`) — Kafka orders only within a topic-partition, so split across
-  topics a delete can overtake its register (verified). The relay dispatches by `event_type` (one
-  outbox → the right Avro record, all to the one topic); the consumer is a class-level
-  `@KafkaListener` with a `@KafkaHandler` per type; multiple schemas on one topic need
-  `TopicRecordNameStrategy`.
-- **Compensation closes the loop**: if a consumer *can't* apply the change, it emits a compensating
-  event and the originator reverses. Deleting a **funded** patient: billing rejects (can't close an
-  account holding money) and publishes `PatientDeletionRejected` on its own outbound stream
-  (`billing-events`); patient-service consumes it and **restores** the patient (`SoftDeletable.restore()`;
-  the restore loads via a native query since `@SQLRestriction` hides deleted rows). Both directions are
-  idempotent. Billing needs **no outbox** for this because the reject path makes no DB change — it only
-  emits a derived event, so at-least-once inbound redelivery + an idempotent restore suffices (no
-  dual-write to protect). Money never moves on a non-`ACTIVE` account (`AccountNotActiveException` → 409).
-  Services are now **both producers and consumers**. Next: an *orchestrated* saga (coordinator + rollback).
+- **Cross-service consistency: gate synchronously, propagate asynchronously** (never cascade
+  deletes). ACID stops at the service boundary (separate DBs, no cross-DB FK). Split each
+  cross-service concern by what it needs:
+  - **A user-facing veto** ("may this action proceed?") is a **synchronous gRPC command**, owned by
+    the service that holds the data — immediate, authoritative, strongly consistent. Deleting a
+    patient calls billing's `CloseAccountForPatient` (mTLS gRPC): billing closes an empty account, or
+    returns `FAILED_PRECONDITION` for a funded one → patient returns **409** (settle first); billing
+    unreachable → **503** (fail safe — block the delete). The veto runs *before* the local
+    soft-delete, so a rejection leaves the patient untouched — no delete-then-restore flip-flop.
+  - **Consequences / fan-out** ("X happened, others may react") stay **asynchronous events**.
+    Registering a patient is async (outbox → `PatientRegistered` → billing opens the account —
+    decoupled, resilient); `PatientDeleted` is emitted **fan-out only** (analytics/audit/future) —
+    billing no-ops on it.
+  - **Rule of thumb:** one synchronous gate → **sync command**; multi-step / long-running / many
+    gates → **async orchestrated saga** with a visible "pending" state. *Never* implement a
+    user-facing veto via async choreography + compensation — it flip-flops on every rejection.
+  - **Seams are explicit, not hidden:** the sync veto has rare edges (a fast register→delete race
+    can leave an empty orphaned account because open is async; a local failure right after billing
+    closed) — **accepted + reconciled** (see ROADMAP), never papered over. Money never moves on a
+    non-`ACTIVE` account (`AccountNotActiveException` → 409).
+  - **Event ordering:** all of an aggregate's lifecycle events share **one topic** keyed by the
+    aggregate id (`patient-events`) — Kafka orders only within a topic-partition. Multiple schemas on
+    one topic need `TopicRecordNameStrategy`; the consumer is a class-level `@KafkaListener` with a
+    `@KafkaHandler` per type. Next: an *orchestrated* saga (coordinator + rollback) for a genuinely
+    multi-step transaction.
 
 ## Build & run
 
@@ -253,11 +258,10 @@ compilation problems` / `No qualifying bean of type PatientMapper` at startup). 
       (unique-key replay), insufficient-funds → 422, money never rounded (`@Digits`), 30 tests
 - [x] `billing-service` dockerized (multi-stage image + `billing-service-db` in root compose);
       both services + their DBs come up with `docker compose up --build`. 60 tests green total.
-- [x] gRPC `billing` server (`OpenAccount`, net.devh) secured with **mTLS** (dev certs, zero cert
-      material committed — `./generate-certs.sh` regenerates a shared CA + per-service certs;
-      `certs/` git-ignored). Now a **synchronous API kept for future callers** — registration no
-      longer uses it. *(The patient-side gRPC client + Resilience4j were removed in the Kafka
-      conversion below; that history lives in git.)*
+- [x] gRPC `billing` server (net.devh) secured with **mTLS** (dev certs, zero cert material
+      committed — `./generate-certs.sh` regenerates a shared CA + per-service certs; `certs/`
+      git-ignored). Exposes `OpenAccount` and **`CloseAccountForPatient`** (the deletion veto —
+      patient-service is a gRPC **client** again for this synchronous call).
 - [x] **Kafka event backbone** (KRaft) + **Confluent Schema Registry** + **Avro** contracts +
       **kafka-ui**. Registering a patient now publishes `PatientRegistered` via the **Transactional
       Outbox** (`outbox_events` + `@Scheduled OutboxRelay`, at-least-once); `billing` consumes it
@@ -265,13 +269,13 @@ compilation problems` / `No qualifying bean of type PatientMapper` at startup). 
       **DLQ** (`patient-events.DLT`) on exhausted retries / poison messages.
 - [x] Outbox→Kafka→billing flow **verified end-to-end in Docker** (register → account opened;
       idempotent redelivery = no-op, no DLQ).
-- [x] **Deletion saga with compensation** (choreographed): soft-deleting a patient publishes
-      `PatientDeleted` (relay dispatches by `event_type`). Billing **closes** an empty account; a
-      **funded** account is **rejected** → billing publishes `PatientDeletionRejected` on
-      `billing-events` → patient-service **restores** the patient. Both directions idempotent; money
-      can't move on a non-`ACTIVE` account (409). All patient events share the ordered `patient-events`
-      topic so a delete can't overtake its register. Services are now both producers and consumers.
-- [ ] Next: auth-service (JWT/OAuth2) + secure the APIs; then orchestrated saga, CDC (Debezium)
+- [x] **Deletion = synchronous gRPC veto** (`CloseAccountForPatient`, mTLS): billing closes an empty
+      account, or `FAILED_PRECONDITION` for a funded one → patient returns **409** (settle first);
+      billing down → **503**. Runs before the soft-delete (no flip-flop). `PatientDeleted` is now
+      **fan-out only** (billing no-ops). Money can't move on a non-`ACTIVE` account (409). *(This
+      replaced an async compensation saga — "gate sync, propagate async"; the saga history lives in git.)*
+- [ ] Next: auth-service (JWT/OAuth2) + secure the APIs; then orchestrated saga, CDC (Debezium),
+      + a reconciliation job for the register→delete race edge
       + multi-instance relay locking
 
 **gRPC note:** uses **net.devh `grpc-spring-boot-starter` 3.1.0** on both sides, NOT the official

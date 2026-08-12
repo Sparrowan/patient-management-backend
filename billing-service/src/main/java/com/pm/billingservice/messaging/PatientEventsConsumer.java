@@ -8,11 +8,8 @@ import org.springframework.kafka.annotation.KafkaHandler;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 
-import com.pm.billingservice.dto.BillingAccountResponseDTO;
 import com.pm.billingservice.dto.OpenAccountRequestDTO;
 import com.pm.billingservice.exception.AccountAlreadyExistsException;
-import com.pm.billingservice.exception.AccountHasBalanceException;
-import com.pm.billingservice.exception.BillingAccountNotFoundException;
 import com.pm.billingservice.service.BillingAccountService;
 import com.pm.events.PatientDeleted;
 import com.pm.events.PatientRegistered;
@@ -20,16 +17,14 @@ import com.pm.events.PatientRegistered;
 import lombok.RequiredArgsConstructor;
 
 /**
- * Consumes the patient lifecycle stream. <b>All patient events share ONE topic</b>
- * ({@code patient-events}) keyed by {@code patientId}, so a patient's events are strictly ordered —
- * register is always processed before delete. (Kafka orders only within a topic-partition, so
- * splitting event types across topics would let a delete overtake its register — verified.) Spring
- * routes each record to the {@link KafkaHandler} whose parameter type matches the Avro record.
+ * Consumes the patient lifecycle stream ({@code patient-events}). Spring routes each record to the
+ * {@link KafkaHandler} whose parameter type matches the Avro record.
  *
- * <p>Both handlers are <b>idempotent</b>: opening a duplicate account and deactivating an
- * already-deactivated (or absent) one are treated as success, never rethrown — so a redelivery is
- * not dead-lettered. Any other failure propagates to the container error handler → retried, then
- * dead-lettered to {@code patient-events.DLT}.
+ * <p><b>Registration is async</b>: {@code PatientRegistered} opens the account here, idempotently
+ * (a duplicate is treated as success, never dead-lettered). <b>Deletion is synchronous</b>: it is
+ * handled by the gRPC veto ({@code CloseAccountForPatient}), which closes the account before the
+ * patient is deleted — so {@code PatientDeleted} is <b>fan-out only</b> here (billing takes no
+ * action; the handler exists just so the shared topic doesn't route it to the default handler).
  */
 @Component
 @RequiredArgsConstructor
@@ -39,7 +34,6 @@ public class PatientEventsConsumer {
     private static final Logger log = LoggerFactory.getLogger(PatientEventsConsumer.class);
 
     private final BillingAccountService accountService;
-    private final BillingEventsPublisher billingEventsPublisher;
 
     @KafkaHandler
     public void onPatientRegistered(PatientRegistered event) {
@@ -55,21 +49,8 @@ public class PatientEventsConsumer {
 
     @KafkaHandler
     public void onPatientDeleted(PatientDeleted event) {
-        UUID patientId = UUID.fromString(event.getPatientId());
-        try {
-            BillingAccountResponseDTO account = accountService.deactivateForPatient(patientId);
-            log.info("Deactivated billing account for deleted patient {} → {} (event {})",
-                    patientId, account.status(), event.getEventId());
-        } catch (BillingAccountNotFoundException e) {
-            log.info("No billing account for deleted patient {} — nothing to deactivate (event {})",
-                    patientId, event.getEventId());
-        } catch (AccountHasBalanceException e) {
-            // Compensation: a patient with a funded account can't be deleted. Ask patient-service to
-            // restore the patient (the balance must be settled first).
-            billingEventsPublisher.publishDeletionRejected(patientId, "billing account has a non-zero balance");
-            log.info("Rejected deletion of patient {} — funded account; published compensation (event {})",
-                    patientId, event.getEventId());
-        }
+        // Fan-out only — the account was already closed synchronously via the gRPC veto.
+        log.debug("PatientDeleted for {} — no billing action (closed synchronously)", event.getPatientId());
     }
 
     /** An event type we don't handle yet — log and skip rather than fail the partition. */

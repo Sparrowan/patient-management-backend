@@ -1,8 +1,10 @@
 package com.pm.patientservice;
 
+import com.pm.patientservice.grpc.BillingGrpcClient;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.testcontainers.containers.MariaDBContainer;
 
 /**
@@ -18,6 +20,11 @@ import org.testcontainers.containers.MariaDBContainer;
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 public abstract class AbstractIntegrationTest {
+
+    // The delete flow makes a synchronous gRPC veto to billing; there's no billing server in these
+    // tests, so mock it (a no-op veto = "allowed"). The gRPC path itself is covered by unit tests.
+    @MockitoBean
+    protected BillingGrpcClient billingGrpcClient;
 
     static final MariaDBContainer<?> MARIADB = new MariaDBContainer<>("mariadb:11.7");
 
