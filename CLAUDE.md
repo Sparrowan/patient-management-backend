@@ -291,9 +291,12 @@ compilation problems` / `No qualifying bean of type PatientMapper` at startup). 
       `@PreAuthorize("hasRole('ADMIN')")` makes **deleting a patient admin-only** (`ROLE_USER` → 403).
       *Gotcha:* `@PreAuthorize` throws inside the servlet, so the global advice must map
       `AccessDeniedException` → 403 or the catch-all turns it into 500 (401 is filter-level, unaffected).
+- [x] **JPA auditing "who"** — an `AuditorAware<String>` reads the JWT `sub` from the SecurityContext
+      (`"system"` for background writes); `@CreatedBy`/`@LastModifiedBy` on `BaseEntity` now stamp
+      `created_by`/`updated_by` (patient `V6`). The audit trail finally records who did what.
 - [ ] Next: gateway **edge JWT validation** (reactive `SecurityWebFilterChain` — validate + forward);
-      **`AuditorAware`** (createdBy/updatedBy from the principal); secure **billing** + service-to-service
-      token propagation; then orchestrated saga, CDC (Debezium), reconciliation job, relay locking.
+      secure **billing** + service-to-service token propagation (billing writes have no principal yet
+      — auditor would be `"system"`); then orchestrated saga, CDC (Debezium), reconciliation, relay locking.
 
 **gRPC note:** uses **net.devh `grpc-spring-boot-starter` 3.1.0** on both sides, NOT the official
 `org.springframework.grpc` — its only published Boot starter (1.0.3) is binary-incompatible with

@@ -61,6 +61,17 @@ class PatientIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
+    @DisplayName("audit: created_by/updated_by are stamped from the authenticated principal")
+    void stampsAuditUser() {
+        // The base class authenticates requests as the JWT subject "test-user".
+        PatientResponseDTO created = createAda();
+
+        String createdBy = jdbcTemplate.queryForObject(
+                "SELECT created_by FROM patients WHERE id = ?", String.class, created.id());
+        assertThat(createdBy).isEqualTo("test-user");
+    }
+
+    @Test
     @DisplayName("full lifecycle: create → read → update → delete → gone")
     void fullLifecycle() {
         PatientResponseDTO created = createAda();
