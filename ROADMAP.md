@@ -113,15 +113,27 @@ cross-reference the backend-patterns catalog we're prioritizing for banking/fint
 - [ ] **Table partitioning** — range-partition append-only/time-series tables (`ledger_entries`,
       `outbox_events`) by month so old data is pruned/archived cheaply and hot queries scan less.
       Comes *before* sharding (single DB, no app changes).
-- [ ] **Horizontal sharding** — the last DB lever. DB-per-service already gives functional sharding;
-      key-based sharding (e.g. by `patient_id`) via **Apache ShardingSphere-JDBC** (Spring Boot
-      starter, app-transparent) or a **Vitess** proxy (MariaDB-compatible; sharding lives *below*
-      JDBC, so Spring needs ~zero changes). UUID PKs already avoid global-sequence contention. `[#21]`
+- [ ] **Horizontal sharding** — the last DB lever. **Trigger is write-throughput-beyond-one-primary
+      or hot-set-beyond-RAM, *not* row count** — a single indexed InnoDB node handles 100M–1B rows
+      fine (an indexed lookup is ~3–5 page reads at 1M *or* 1B; row count barely moves it). Reads
+      scale out with replicas + cache; only *writes* (which every replica must also apply) force
+      sharding. So exhaust replicas → cache → partitioning → cold-data archival first; shard only when
+      one primary genuinely can't absorb the write load or the working set won't fit RAM. DB-per-service
+      already gives functional sharding; key-based sharding (e.g. by `patient_id`) via **Apache
+      ShardingSphere-JDBC** (Spring Boot starter, app-transparent) or a **Vitess** proxy
+      (MariaDB-compatible; sharding lives *below* JDBC, so Spring needs ~zero changes). UUID PKs
+      already avoid global-sequence contention. `[#21]`
 - [ ] **Ordered UUID (UUIDv7)** — switch PK generation to time-ordered UUIDs so inserts stay
       sequential in InnoDB's clustered index (random UUIDv4 causes page splits/write amplification at
       volume) — keeps the sharding-friendliness *and* insert locality.
-- [ ] **Full-text search** (Elasticsearch/OpenSearch) — `idx_patients_name` covers prefix/sort now;
-      fuzzy/typo-tolerant patient search at scale wants a dedicated search index fed off the CDC/event stream.
+- [ ] **Full-text / fuzzy search** (Elasticsearch/OpenSearch) — a *different* index type: an
+      **inverted index** (term → documents), not a B-tree, built for relevance-ranked, typo-tolerant,
+      partial-word search. **When we'd need it:** the B-tree `idx_patients_name` only serves
+      exact/prefix match + sort (`LIKE 'sm%'` fast; `LIKE '%mit%'` and "did you mean *Smith*?" can't
+      use it → full scan). The day patient lookup needs fuzzy/mid-word/multi-field ranked search, add
+      a search index kept in sync off the **CDC / Kafka event stream** (search is a *read model*, never
+      the source of truth — Postgres/MariaDB stays authoritative). Not before then — it's a whole
+      component to run, and exact/prefix search doesn't justify it.
 - [ ] **CQRS read models** for reporting/statements. `[#54]`
 - [ ] **Distributed locks** (Redlock/ZooKeeper) for singleton scheduled jobs (e.g. interest accrual). `[#90]`
 
