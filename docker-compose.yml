@@ -172,6 +172,8 @@ services:
         condition: service_healthy
       schema-registry:
         condition: service_healthy
+      auth-service:
+        condition: service_started
     environment:
       DB_URL: jdbc:mariadb://billing-service-db:3306/billing_db
       DB_USERNAME: billing
@@ -179,6 +181,8 @@ services:
       SPRING_PROFILES_ACTIVE: docker
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      # Verify JWTs on REST calls against auth-service's JWKS (in-network).
+      AUTH_JWKS_URI: http://auth-service:4002/oauth2/jwks
     ports:
       - "4001:4001"
       - "9001:9001"   # gRPC (synchronous API; published for host debugging)

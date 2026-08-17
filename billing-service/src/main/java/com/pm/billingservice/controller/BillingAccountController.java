@@ -17,6 +17,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -75,8 +76,10 @@ public class BillingAccountController {
             description = "Adds funds. Requires an Idempotency-Key header; a retried key returns the original result.")
     @ApiResponse(responseCode = "200", description = "Applied (or replayed)")
     @ApiResponse(responseCode = "400", description = "Validation failed / missing Idempotency-Key")
+    @ApiResponse(responseCode = "403", description = "Not an admin")
     @ApiResponse(responseCode = "404", description = "No such account")
     @PostMapping("/{id}/credit")
+    @PreAuthorize("hasRole('ADMIN')")
     public LedgerEntryResponseDTO credit(
             @PathVariable UUID id,
             @Valid @RequestBody MoneyMovementRequestDTO request,
@@ -91,7 +94,9 @@ public class BillingAccountController {
     @ApiResponse(responseCode = "400", description = "Validation failed / missing Idempotency-Key")
     @ApiResponse(responseCode = "404", description = "No such account")
     @ApiResponse(responseCode = "422", description = "Insufficient funds")
+    @ApiResponse(responseCode = "403", description = "Not an admin")
     @PostMapping("/{id}/debit")
+    @PreAuthorize("hasRole('ADMIN')")
     public LedgerEntryResponseDTO debit(
             @PathVariable UUID id,
             @Valid @RequestBody MoneyMovementRequestDTO request,

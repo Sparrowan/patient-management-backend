@@ -32,6 +32,7 @@ class BillingAccountIntegrationTest extends AbstractIntegrationTest {
 
     @Autowired private TestRestTemplate rest;
     @Autowired private JdbcTemplate jdbcTemplate;
+    @org.springframework.boot.test.web.server.LocalServerPort private int port;
 
     @BeforeEach
     void resetData() {
@@ -152,5 +153,13 @@ class BillingAccountIntegrationTest extends AbstractIntegrationTest {
     void unknownIdReturns404() {
         assertThat(rest.getForEntity(BASE + "/{id}", String.class, UUID.randomUUID()).getStatusCode())
                 .isEqualTo(HttpStatus.NOT_FOUND);
+    }
+
+    @Test
+    @DisplayName("requires a token: a request with no Authorization header → 401")
+    void unauthenticatedRequestIsRejected() {
+        ResponseEntity<String> response =
+                new TestRestTemplate().getForEntity("http://localhost:" + port + BASE, String.class);
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
     }
 }

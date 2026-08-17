@@ -8,6 +8,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.pm.billingservice.config.SecurityConfig;
 import com.pm.billingservice.dto.BillingAccountResponseDTO;
 import com.pm.billingservice.dto.LedgerEntryResponseDTO;
 import com.pm.billingservice.dto.PagedResponse;
@@ -24,12 +25,17 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 /** Web-layer tests: controller + validation + global exception handler only, service mocked. */
 @WebMvcTest(BillingAccountController.class)
+@Import(SecurityConfig.class)
+@WithMockUser(roles = "ADMIN") // most billing ops (incl. money movement) need admin; a USER-403 case is below
 @DisplayName("BillingAccountController")
 class BillingAccountControllerTest {
 
@@ -38,6 +44,7 @@ class BillingAccountControllerTest {
 
     @Autowired private MockMvc mockMvc;
     @MockitoBean private BillingAccountService accountService;
+    @MockitoBean private JwtDecoder jwtDecoder; // satisfies the resource-server chain; unused with @WithMockUser
 
     private BillingAccountResponseDTO response() {
         return new BillingAccountResponseDTO(
@@ -155,5 +162,17 @@ class BillingAccountControllerTest {
                         .content("{\"amount\":50.00}"))
                 .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.title").value("Insufficient funds"));
+    }
+
+    @Test
+    @DisplayName("POST /credit as a non-admin (USER) returns 403 (money movement is admin-only)")
+    @WithMockUser(roles = "USER")
+    void creditAsUserReturns403() throws Exception {
+        mockMvc.perform(post("/api/v1/billing-accounts/{id}/credit", ACCOUNT_ID)
+                        .header("Idempotency-Key", "k1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"amount\":50.00}"))
+                .andExpect(status().isForbidden());
+        org.mockito.Mockito.verifyNoInteractions(accountService);
     }
 }
