@@ -286,9 +286,14 @@ compilation problems` / `No qualifying bean of type PatientMapper` at startup). 
 - [x] **api-gateway** (`:4004`, Spring Cloud Gateway 5.0 / Spring Cloud 2025.0, reactive) — single
       entry point, `RouteLocator` DSL routes `/api/v1/{auth,patients,billing-accounts}/**` + `/oauth2/jwks`
       to each service. Full stack (10 containers) runs behind it; login→token→access verified end-to-end.
+- [x] **RBAC** — a `JwtAuthenticationConverter` maps our custom `roles` claim (space-separated,
+      already `ROLE_`-prefixed → empty authority prefix) to authorities; `@EnableMethodSecurity` +
+      `@PreAuthorize("hasRole('ADMIN')")` makes **deleting a patient admin-only** (`ROLE_USER` → 403).
+      *Gotcha:* `@PreAuthorize` throws inside the servlet, so the global advice must map
+      `AccessDeniedException` → 403 or the catch-all turns it into 500 (401 is filter-level, unaffected).
 - [ ] Next: gateway **edge JWT validation** (reactive `SecurityWebFilterChain` — validate + forward);
-      **RBAC** (`@PreAuthorize`, map the `roles` claim); **`AuditorAware`** (createdBy/updatedBy); then
-      orchestrated saga, CDC (Debezium), reconciliation job, multi-instance relay locking.
+      **`AuditorAware`** (createdBy/updatedBy from the principal); secure **billing** + service-to-service
+      token propagation; then orchestrated saga, CDC (Debezium), reconciliation job, relay locking.
 
 **gRPC note:** uses **net.devh `grpc-spring-boot-starter` 3.1.0** on both sides, NOT the official
 `org.springframework.grpc` — its only published Boot starter (1.0.3) is binary-incompatible with

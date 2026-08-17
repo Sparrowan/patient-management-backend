@@ -16,6 +16,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.http.HttpHeaders;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -89,11 +90,13 @@ public class PatientController {
         return patientService.updatePatient(id, request);
     }
 
-    @Operation(summary = "Delete a patient", description = "Soft delete — the record is retained, not removed.")
+    @Operation(summary = "Delete a patient", description = "Soft delete — the record is retained, not removed. Admin only.")
     @ApiResponse(responseCode = "204", description = "Deleted")
+    @ApiResponse(responseCode = "403", description = "Not an admin")
     @ApiResponse(responseCode = "404", description = "No such patient")
     @DeleteMapping("/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
+    @PreAuthorize("hasRole('ADMIN')")
     public void deletePatient(@PathVariable UUID id) {
         patientService.deletePatient(id);
     }

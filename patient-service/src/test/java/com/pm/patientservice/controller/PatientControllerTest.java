@@ -182,8 +182,18 @@ class PatientControllerTest {
     }
 
     @Test
-    @DisplayName("DELETE /api/v1/patients/{id} returns 204")
-    void deleteReturns204() throws Exception {
+    @DisplayName("DELETE /api/v1/patients/{id} returns 204 for an admin")
+    @WithMockUser(roles = "ADMIN")
+    void deleteReturns204ForAdmin() throws Exception {
         mockMvc.perform(delete("/api/v1/patients/{id}", ID)).andExpect(status().isNoContent());
+    }
+
+    @Test
+    @DisplayName("DELETE /api/v1/patients/{id} returns 403 for a non-admin (RBAC)")
+    @WithMockUser(roles = "USER")
+    void deleteReturns403ForNonAdmin() throws Exception {
+        mockMvc.perform(delete("/api/v1/patients/{id}", ID)).andExpect(status().isForbidden());
+        // The service is never reached — @PreAuthorize blocks first.
+        org.mockito.Mockito.verifyNoInteractions(patientService);
     }
 }
