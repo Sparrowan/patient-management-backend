@@ -78,15 +78,50 @@ cross-reference the backend-patterns catalog we're prioritizing for banking/fint
 - [x] **Containerization** — per-service multi-stage `Dockerfile` (non-root, healthcheck) + root
       `docker-compose.yml` (per-service DB). Done for `patient-service`.
 - [ ] **CI/CD** + **K8s manifests/Helm**; blue-green / canary rollout. `[#91/#92]`
+- [ ] **Load balancing + horizontal autoscaling** — L7 LB in front of each service's replicas (the
+      gateway routes; the LB spreads load across pods); K8s **HPA** scales replica count on CPU/RPS.
+      Cheap and effective *because* the services are stateless. `[#20]`
 - [ ] **Contract testing** (Spring Cloud Contract) between services. `[#94]`
 - [ ] **Platform e2e tests** — separate module booting gateway → patient → billing → Kafka.
       Introduce once a second service + gateway exist.
 
 ### Data & scale
 
+> **See the [Scaling playbook](#scaling-playbook--the-lever-order-to-100m-users) below** for how
+> these items sequence — pull them in cost order (index → replicas → cache → partition → shard),
+> not all at once.
+
+- [x] **Stateless services** — the enabler for everything else. All services are
+      `SessionCreationPolicy.STATELESS` with JWTs verified locally against JWKS (no server session,
+      no sticky sessions); all durable state lives in the DB / Kafka / outbox. So any replica serves
+      any request → scale out by adding pods. *(One current blocker to running >1 patient-service
+      replica: the `@Scheduled OutboxRelay` isn't multi-instance-safe yet — see the SKIP LOCKED/
+      ShedLock item under Event-driven.)*
 - [ ] **Keyset (cursor) pagination** for large history endpoints (offset is fine for now). `[#24]`
-- [ ] **Read/write splitting** across replicas. `[#20]`
-- [ ] **Caching** (Redis) — cache-aside for read-heavy endpoints. `[#38]`
+- [ ] **Read/write splitting** across replicas — most traffic is reads; route `@Transactional(readOnly=true)`
+      to replicas via `AbstractRoutingDataSource`, or transparently with **ShardingSphere-JDBC**. `[#20]`
+- [ ] **Connection-pool tuning** (HikariCP) — pool size is a scale lever (and a footgun): total
+      connections across all replicas must stay under the DB's `max_connections`. Right-size per
+      service before adding replicas.
+- [ ] **CDN / edge caching** — front the gateway with a CDN (CloudFront/Cloudflare) for TLS
+      termination, geo-routing, DDoS absorption, and edge-caching cacheable `GET`s (honoring the
+      existing `ETag`/`Cache-Control`). PHI responses stay `no-store`; the win here is static/public
+      assets, JWKS, and absorbing edge load — not caching patient data.
+- [ ] **Caching** (Redis) — cache-aside for read-heavy endpoints + the id→display-name resolution.
+      **PHI is not cached casually** (a Redis of names/DOBs is another PHI store — encrypt + TTL, or
+      cache only ids/non-PHI). `[#38]`
+- [ ] **Table partitioning** — range-partition append-only/time-series tables (`ledger_entries`,
+      `outbox_events`) by month so old data is pruned/archived cheaply and hot queries scan less.
+      Comes *before* sharding (single DB, no app changes).
+- [ ] **Horizontal sharding** — the last DB lever. DB-per-service already gives functional sharding;
+      key-based sharding (e.g. by `patient_id`) via **Apache ShardingSphere-JDBC** (Spring Boot
+      starter, app-transparent) or a **Vitess** proxy (MariaDB-compatible; sharding lives *below*
+      JDBC, so Spring needs ~zero changes). UUID PKs already avoid global-sequence contention. `[#21]`
+- [ ] **Ordered UUID (UUIDv7)** — switch PK generation to time-ordered UUIDs so inserts stay
+      sequential in InnoDB's clustered index (random UUIDv4 causes page splits/write amplification at
+      volume) — keeps the sharding-friendliness *and* insert locality.
+- [ ] **Full-text search** (Elasticsearch/OpenSearch) — `idx_patients_name` covers prefix/sort now;
+      fuzzy/typo-tolerant patient search at scale wants a dedicated search index fed off the CDC/event stream.
 - [ ] **CQRS read models** for reporting/statements. `[#54]`
 - [ ] **Distributed locks** (Redlock/ZooKeeper) for singleton scheduled jobs (e.g. interest accrual). `[#90]`
 
@@ -174,8 +209,39 @@ platform/compliance teams own it, but design compatibly and be able to speak to 
 - [ ] **Webhook delivery with retries + signing**, **API deprecation policy**, **per-client/tenant
       SLAs**, **sandbox environments**. `[code/org]`
 
+## Scaling playbook — the lever order (to 100M users)
+
+> The trap in system-design tutorials is treating Redis + sharding as things you add *now*. The
+> senior move is the opposite: **measure, then pull the cheapest lever that moves the metric.** Our
+> architecture is already the right *foundation* (stateless services, DB-per-service, event-driven,
+> idempotent consumers, UUID keys) — scaling is bolting techniques onto this skeleton in cost order,
+> not a rewrite. The items are detailed under [Data & scale](#data--scale) / [Platform](#platform);
+> this is the sequence to apply them.
+
+Pull in this order (each step buys headroom; only advance when metrics say so):
+
+1. **Index + query tuning** — verify with `EXPLAIN`. Cheapest, highest ROI. *(Already practiced —
+   see Tier 1 DB indexing.)*
+2. **Vertical scale** — bigger DB/pod. Boring, buys time, no code change.
+3. **Read replicas** — most traffic is reads; split read/write. Single biggest DB win.
+4. **Cache** (Redis) + **CDN/edge** — take read load off the DB and origin entirely.
+5. **Stateless horizontal scale** — more service replicas behind an LB + HPA. *(Foundation already
+   in place; unblock by making the outbox relay multi-instance-safe first.)*
+6. **Table partitioning** — prune/archive time-series tables (ledger, outbox) within one DB.
+7. **Horizontal sharding** — split the data tier by key (ShardingSphere/Vitess). Last, most-invasive;
+   most systems never reach it because 1–6 suffice.
+
+**Does Spring Boot "support" 100M-scale?** Spring stays deliberately *thin* here — scaling is a
+data-tier + infra concern. Spring's role is routing (`AbstractRoutingDataSource`, ShardingSphere-JDBC
+starter) and staying stateless so replicas are free; the heavy lifting (Vitess, replicas, CDN, HPA)
+lives *below or around* the app, which is exactly why the app barely changes as you climb the tiers.
+
 ## Sources
 
+- [Scalability — AlgoMaster (lever order: vertical/horizontal, replicas, sharding, cache/CDN)](https://algomaster.io/learn/system-design/scalability)
+- [System Design: APIs, Databases, Caching, CDNs, Load Balancing & Production Infra](https://levelup.gitconnected.com/system-design-explained-apis-databases-caching-cdns-load-balancing-production-infra-81cddb7db3a7)
+- [Scaling your Spring Boot app with ShardingSphere-JDBC (sharding + read/write splitting)](https://medium.com/@umeshcapg/a-guide-to-shardingsphere-jdbc-scaling-your-spring-boot-app-with-database-sharding-44e1ba0fa473)
+- [A Guide to ShardingSphere — Baeldung](https://www.baeldung.com/java-shardingsphere)
 - [Java Microservices Best Practices for Production 2026](https://gainjavaknowledge.medium.com/java-microservices-architecture-guide-spring-boot-best-practices-for-production-2026-e7c451b9d6f2)
 - [Designing Resilient Microservices with Spring Boot](https://www.researchgate.net/publication/400371112_Designing_Resilient_Microservices_with_Spring_Boot_Fault_Tolerance_Circuit_Breakers_and_Observability)
 - [Spring Boot Microservices at Scale: Reliability Lessons from Production](https://www.tymiq.com/post/spring-boot-microservices-lessons-from-real-projects)
