@@ -12,6 +12,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.web.client.TestRestTemplate;
+import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
@@ -32,6 +33,7 @@ class PatientIntegrationTest extends AbstractIntegrationTest {
 
     @Autowired private TestRestTemplate rest;
     @Autowired private JdbcTemplate jdbcTemplate;
+    @LocalServerPort private int port;
 
     @BeforeEach
     void resetData() {
@@ -47,6 +49,15 @@ class PatientIntegrationTest extends AbstractIntegrationTest {
                 rest.postForEntity(BASE, request, PatientResponseDTO.class);
         assertThat(created.getStatusCode()).isEqualTo(HttpStatus.CREATED);
         return created.getBody();
+    }
+
+    @Test
+    @DisplayName("requires a token: a request with no Authorization header → 401")
+    void unauthenticatedRequestIsRejected() {
+        // A bare template (no bearer-token interceptor) → the resource server rejects it.
+        ResponseEntity<String> response =
+                new TestRestTemplate().getForEntity("http://localhost:" + port + BASE, String.class);
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
     }
 
     @Test

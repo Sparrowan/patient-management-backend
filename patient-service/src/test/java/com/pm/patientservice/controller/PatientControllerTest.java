@@ -14,6 +14,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pm.patientservice.dto.PagedResponse;
 import com.pm.patientservice.dto.PatientResponseDTO;
+import com.pm.patientservice.config.SecurityConfig;
 import com.pm.patientservice.dto.PatientUpdateRequestDTO;
 import com.pm.patientservice.exception.EmailAlreadyExistsException;
 import com.pm.patientservice.exception.PatientNotFoundException;
@@ -25,9 +26,12 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -37,6 +41,8 @@ import org.springframework.test.web.servlet.MockMvc;
  * request validation, and the RFC 7807 error shape — without a database.
  */
 @WebMvcTest(PatientController.class)
+@Import(SecurityConfig.class) // load the real resource-server chain (CSRF off, JWT required)
+@WithMockUser // authenticate every request in this slice; the auth rules themselves are tested in the integration test
 @DisplayName("PatientController")
 class PatientControllerTest {
 
@@ -46,6 +52,8 @@ class PatientControllerTest {
     @Autowired private MockMvc mockMvc;
     @Autowired private ObjectMapper objectMapper;
     @MockitoBean private PatientService patientService;
+    // The resource-server chain needs a JwtDecoder bean; @WithMockUser means it's never actually called.
+    @MockitoBean private JwtDecoder jwtDecoder;
 
     private PatientResponseDTO response(long version) {
         return new PatientResponseDTO(ID, "Ada Lovelace", "ada@example.com", "12 Analytical St", DOB, version);

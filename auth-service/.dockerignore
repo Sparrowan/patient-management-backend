@@ -1,0 +1,11 @@
+# Keep the build context small — only pom.xml + src are needed for the image build.
+target/
+.git/
+.gitignore
+.env
+.env.example
+.vscode/
+.idea/
+*.iml
+*.log
+HELP.md

@@ -27,11 +27,14 @@ multi-module reactor build.
 patient-management/
 ├── patient-service/     # core patient CRUD (REST + JPA + MariaDB)   ← reference service
 ├── billing-service/     # billing accounts + ledger; gRPC server called by patient-service
-├── docker-compose.yml   # root orchestration: both services + a DB container each
-├── analytics-service/   # (planned) Kafka consumer, event-driven
-├── auth-service/        # (planned) JWT issuing + validation
-└── api-gateway/         # (planned) Spring Cloud Gateway, single entry point
+├── auth-service/        # JWT issuer: /login + /register, RSA-signed tokens, JWKS endpoint (:4002)
+├── api-gateway/         # Spring Cloud Gateway — single entry point, routes to all services (:4004)
+├── docker-compose.yml   # root orchestration: every service + a DB container each + Kafka/SR
+└── analytics-service/   # (planned) Kafka consumer, event-driven
 ```
+
+**Ports:** gateway `:4004` (the single entry point clients use), patient `:4000`, billing `:4001`
+(+ gRPC `:9001`), auth `:4002`; kafka-ui `:8080`, schema-registry `:8081`.
 
 Each service holds its own copy of `billing.proto` under `src/main/proto/` and generates its own
 stubs — a deliberate trade-off to keep services independently buildable (no shared module / no
@@ -274,9 +277,18 @@ compilation problems` / `No qualifying bean of type PatientMapper` at startup). 
       billing down → **503**. Runs before the soft-delete (no flip-flop). `PatientDeleted` is now
       **fan-out only** (billing no-ops). Money can't move on a non-`ACTIVE` account (409). *(This
       replaced an async compensation saga — "gate sync, propagate async"; the saga history lives in git.)*
-- [ ] Next: auth-service (JWT/OAuth2) + secure the APIs; then orchestrated saga, CDC (Debezium),
-      + a reconciliation job for the register→delete race edge
-      + multi-instance relay locking
+- [x] **auth-service** (`:4002`) — Spring Security 6 JWT issuer. `/register` + `/login` (login by
+      username **or** email; BCrypt; DB-backed `UserDetailsService`), RSA-signed (RS256) tokens via
+      `NimbusJwtEncoder`, public keys served at `/oauth2/jwks`. Users in MariaDB (`auth_db`, Flyway).
+- [x] **patient-service secured as a resource server** — `spring.security.oauth2.resourceserver.jwt.jwk-set-uri`
+      → auth's JWKS; `/api/**` requires a valid JWT (verified locally, stateless), `/actuator/**` +
+      swagger stay public. Tests: `@WithMockUser` (web slice), mocked `JwtDecoder` + a real 401 test.
+- [x] **api-gateway** (`:4004`, Spring Cloud Gateway 5.0 / Spring Cloud 2025.0, reactive) — single
+      entry point, `RouteLocator` DSL routes `/api/v1/{auth,patients,billing-accounts}/**` + `/oauth2/jwks`
+      to each service. Full stack (10 containers) runs behind it; login→token→access verified end-to-end.
+- [ ] Next: gateway **edge JWT validation** (reactive `SecurityWebFilterChain` — validate + forward);
+      **RBAC** (`@PreAuthorize`, map the `roles` claim); **`AuditorAware`** (createdBy/updatedBy); then
+      orchestrated saga, CDC (Debezium), reconciliation job, multi-instance relay locking.
 
 **gRPC note:** uses **net.devh `grpc-spring-boot-starter` 3.1.0** on both sides, NOT the official
 `org.springframework.grpc` — its only published Boot starter (1.0.3) is binary-incompatible with

@@ -12,22 +12,22 @@ than a shared multi-module build.
 ## Architecture
 
 ```
-                         ┌─────────────┐
-        client  ───────▶ │ api-gateway │  (single entry point)          planned
-                         └──────┬──────┘
-             ┌──────────────────┼──────────────────┐
-             ▼                  ▼                  ▼
-   ┌──────────────┐                                        ┌───────────────┐
-   │ auth-service │   REGISTER  ─ async ─▶  patient-events  │billing-service│
-   │   planned    │   ┌───────────────┐   (outbox, Avro) ─▶ │  REST :4001   │
-   └──────────────┘   │patient-service│                     │  gRPC :9001   │ (mTLS)
-                      │  REST :4000   │   DELETE ─ sync ─▶   │  opens acct   │
-                      │  producer     │   CloseAccountFor-  │  (on register)│
-                      │  + gRPC client│   Patient (veto):   │  closes/vetoes│
-                      └───────────────┘   409 if funded ◀── │  (on delete)  │
-                              │                             └───────────────┘
-                              └─ PatientDeleted (fan-out only, → future consumers)
+                        ┌──────────────────────┐
+   client  ──────────▶  │  api-gateway  :4004  │   single entry point (Spring Cloud Gateway)
+                        └───────────┬──────────┘   routes /api/v1/{auth,patients,billing-accounts}
+              ┌─────────────────────┼─────────────────────┐
+              ▼                     ▼                     ▼
+     ┌──────────────┐      ┌───────────────┐      ┌───────────────┐
+     │ auth-service │      │patient-service│      │billing-service│
+     │  :4002       │      │  REST :4000   │      │  REST :4001   │
+     │ /login /reg  │      │  resource     │      │  gRPC :9001   │ (mTLS)
+     │ RS256 + JWKS │◀─────│  server (JWT) │      │  resource srv │
+     └──────────────┘ JWKS └──────┬────────┘      └───────────────┘
+       verify tokens              │   REGISTER ─async(outbox,Avro)─▶ opens account
+                                  │   DELETE ─ sync gRPC veto ─────▶ 409 if funded
+                                  └─ PatientDeleted (fan-out only)
 
+  AUTH:     login at the gateway → RS256 JWT; every service validates it locally against auth's JWKS.
   REGISTER: async event (guaranteed via outbox), decoupled/resilient.
   DELETE:   synchronous gRPC veto — immediate 409 if the account is funded (no flip-flop).
   Kafka (KRaft) + Schema Registry · kafka-ui :8080 · patient-events (+ .DLT) · DB per service
@@ -52,18 +52,19 @@ funds. The **fan-out** (registration opening an account; `PatientDeleted` for an
 | Messaging    | **Kafka** (KRaft) + **Confluent Schema Registry** + **Avro**  |
 | Reliability  | **Transactional Outbox** (guaranteed publish) + consumer **DLQ** |
 | Sync RPC     | gRPC (billing `OpenAccount` server), secured with **mTLS**    |
-| Gateway      | Spring Cloud Gateway *(planned)*                              |
+| Security     | **JWT** (RS256) — auth-service issues, services validate as **resource servers** (JWKS) |
+| Gateway      | **Spring Cloud Gateway** 5.0 (reactive) — single entry point `:4004` |
 | Containers   | Docker + docker-compose (database-per-service)                |
 
 ## Services
 
 | Service             | Responsibility                                             | Status         |
 | ------------------- | ---------------------------------------------------------- | -------------- |
-| `patient-service`   | Patient CRUD (REST); publishes events via the outbox       | ✅ Working     |
+| `api-gateway`       | Single entry point (:4004), routes to all services         | ✅ Working     |
+| `auth-service`      | JWT issuer: /login + /register, RS256, JWKS (:4002)        | ✅ Working     |
+| `patient-service`   | Patient CRUD (REST); outbox producer; JWT resource server  | ✅ Working     |
 | `billing-service`   | Billing accounts + ledger; Kafka consumer; gRPC server     | ✅ Working     |
 | `analytics-service` | Consumes domain events from Kafka                          | 📋 Planned     |
-| `auth-service`      | Authentication, JWT issuing & validation                   | 📋 Planned     |
-| `api-gateway`       | Single entry point, routing to services                    | 📋 Planned     |
 
 ## Prerequisites
 
@@ -81,24 +82,31 @@ cd patient-management
 #    Nothing cert-related is committed — this regenerates it. See "Security" below.
 ./generate-certs.sh
 
-# 2. Bring up the whole stack (both services + a MariaDB each + Kafka + Schema Registry + kafka-ui).
+# 2. Bring up the whole stack (all services + a MariaDB each + Kafka + Schema Registry + kafka-ui).
 docker compose up --build
-#    patient-service  REST  http://localhost:4000
-#    billing-service  REST  http://localhost:4001   gRPC :9001
+#    api-gateway            http://localhost:4004   ← the single entry point clients use
+#    auth-service           http://localhost:4002   (also via the gateway)
+#    patient / billing      :4000 / :4001 (+ gRPC :9001) — reachable through the gateway
 #    kafka-ui               http://localhost:8080   (topics, messages, Avro schemas, DLQ)
 #    schema-registry        http://localhost:8081
 ```
 
-Swagger UI per service at `/swagger-ui.html`; health at `/actuator/health`:
+Everything is reached through the **gateway on :4004**. The APIs require a JWT — get one by logging
+in (the seeded dev admin is `admin` / `password`):
 
-```
-http://localhost:4000/swagger-ui.html      http://localhost:4000/actuator/health
-http://localhost:4001/swagger-ui.html      http://localhost:4001/actuator/health
+```bash
+# 1. Log in through the gateway → access token
+TOKEN=$(curl -s -X POST http://localhost:4004/api/v1/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"usernameOrEmail":"admin","password":"password"}' | jq -r .accessToken)
+
+# 2. Call a protected API through the gateway (401 without the token, 200 with it)
+curl -H "Authorization: Bearer $TOKEN" http://localhost:4004/api/v1/patients
 ```
 
-**End-to-end check:** `POST /api/v1/patients` on :4000 registers a patient. In the *same*
-transaction an event is written to the `outbox_events` table; the `OutboxRelay` publishes it to the
-Kafka topic `patient-events` (Avro), and billing-service consumes it and opens the account —
+**End-to-end check:** `POST /api/v1/patients` (with the bearer token) registers a patient. In the
+*same* transaction an event is written to the `outbox_events` table; the `OutboxRelay` publishes it
+to the Kafka topic `patient-events` (Avro), and billing-service consumes it and opens the account —
 **guaranteed** (survives a billing outage) and **idempotent** (a redelivery is a no-op).
 
 `DELETE /api/v1/patients/{id}` first makes a **synchronous mTLS gRPC** call to billing

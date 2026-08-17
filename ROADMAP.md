@@ -71,7 +71,9 @@ cross-reference the backend-patterns catalog we're prioritizing for banking/fint
 
 ### Platform
 
-- [ ] **API Gateway** (Spring Cloud Gateway).
+- [~] **API Gateway** (Spring Cloud Gateway 5.0, reactive) — single entry point on `:4004`, routes
+      to all services via the `RouteLocator` DSL. Done: routing. Next: edge JWT validation, rate
+      limiting, CORS.
 - [ ] **Config Server** + **Service Discovery** (or K8s-native).
 - [x] **Containerization** — per-service multi-stage `Dockerfile` (non-root, healthcheck) + root
       `docker-compose.yml` (per-service DB). Done for `patient-service`.
@@ -113,7 +115,10 @@ cross-reference the backend-patterns catalog we're prioritizing for banking/fint
 
 ### Security (regulated domain — PHI / financial)
 
-- [ ] **`auth-service`** — JWT / OAuth2 resource server; **RBAC/ABAC** least privilege. `[#27/#28/#29]`
+- [~] **`auth-service`** — JWT issuer (Spring Security 6): `/register` + `/login` (username-or-email,
+      BCrypt, DB users), RSA/RS256 tokens, JWKS endpoint. **patient-service secured** as a resource
+      server (validates against JWKS). Done. Next: **RBAC** (`@PreAuthorize` + map the `roles` claim),
+      secure **billing** + service-to-service token propagation, **ABAC**/least-privilege. `[#27/#28/#29]`
 - [~] **Zero-trust inter-service security** (never trust the network; encrypt + authenticate +
       authorize *every* call): `[#33]`
   - [x] **mTLS** between services — app-level mTLS on the patient↔billing gRPC call (dev

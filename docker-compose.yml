@@ -119,6 +119,8 @@ services:
         condition: service_healthy
       billing-service:
         condition: service_started
+      auth-service:
+        condition: service_started
     environment:
       # Points at the DB container over the compose network (service name is the hostname).
       DB_URL: jdbc:mariadb://patient-service-db:3306/patient_db
@@ -131,6 +133,8 @@ services:
       SCHEMA_REGISTRY_URL: http://schema-registry:8081
       # Reach billing's gRPC server (deletion veto) over the compose network.
       BILLING_GRPC_ADDRESS: static://billing-service:9001
+      # Fetch auth-service's public keys (JWKS) to verify JWTs in-network.
+      AUTH_JWKS_URI: http://auth-service:4002/oauth2/jwks
     ports:
       - "4000:4000"
     networks:
@@ -181,9 +185,70 @@ services:
     networks:
       - patient-net
 
+  # --- auth-service (issues JWTs; resource servers verify against its JWKS) --------------------
+  auth-service-db:
+    image: mariadb:11.7
+    container_name: auth-service-db
+    environment:
+      MARIADB_DATABASE: auth_db
+      MARIADB_USER: auth
+      MARIADB_PASSWORD: auth
+      MARIADB_ROOT_PASSWORD: root
+    volumes:
+      - auth-db-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - patient-net
+
+  auth-service:
+    build:
+      context: ./auth-service
+    image: patient-management/auth-service:latest
+    container_name: auth-service
+    depends_on:
+      auth-service-db:
+        condition: service_healthy
+    environment:
+      DB_URL: jdbc:mariadb://auth-service-db:3306/auth_db
+      DB_USERNAME: auth
+      DB_PASSWORD: auth
+    ports:
+      - "4002:4002"
+    networks:
+      - patient-net
+
+  # --- api-gateway (single entry point; routes to every service) ------------------------------
+  api-gateway:
+    build:
+      context: ./api-gateway
+    image: patient-management/api-gateway:latest
+    container_name: api-gateway
+    depends_on:
+      auth-service:
+        condition: service_started
+      patient-service:
+        condition: service_started
+      billing-service:
+        condition: service_started
+    environment:
+      # Downstream services by their in-network hostnames.
+      AUTH_SERVICE_URI: http://auth-service:4002
+      PATIENT_SERVICE_URI: http://patient-service:4000
+      BILLING_SERVICE_URI: http://billing-service:4001
+    ports:
+      - "4004:4004"
+    networks:
+      - patient-net
+
 volumes:
   patient-db-data:
   billing-db-data:
+  auth-db-data:
 
 networks:
   patient-net:
