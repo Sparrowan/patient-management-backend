@@ -306,9 +306,17 @@ compilation problems` / `No qualifying bean of type PatientMapper` at startup). 
       at `:4004` before routing (auth routes + JWKS + actuator stay public), and the `Authorization`
       header is forwarded so **services still re-validate** (defense in depth). Edge does authN;
       per-role authZ (`@PreAuthorize`) stays at the services.
-- [ ] Next: gateway **rate limiting** (Redis token bucket) + **CORS**; service-to-service token
-      propagation (billing writes triggered by Kafka have no principal yet — auditor is `"system"`);
-      then orchestrated saga, CDC (Debezium), reconciliation, relay locking.
+- [x] **Service-to-service identity propagation (sync gRPC)** — the patient→billing deletion veto now
+      forwards the caller's `sub` as an `x-actor-id` gRPC metadata header (client interceptor reads the
+      `SecurityContext`; server interceptor binds it to the gRPC `Context`); billing's `AuditorAware`
+      resolves **REST principal → gRPC actor → `"system"`**. So closing an account during a delete is
+      audited as the real user (`updated_by` = their UUID), verified end-to-end. Only the id is sent, not
+      the token — the mTLS channel already authenticates the caller and billing makes no authZ decision on
+      it (trusted identity assertion, not credential relay).
+- [ ] Next: **async actor-in-event** — the Kafka `PatientRegistered → open account` path still stamps
+      `created_by = "system"` (you never propagate a live token over Kafka; carry the actor as an event
+      field instead). Then gateway **rate limiting** (Redis token bucket) + **CORS**; orchestrated saga,
+      CDC (Debezium), reconciliation, relay locking.
 
 **gRPC note:** uses **net.devh `grpc-spring-boot-starter` 3.1.0** on both sides, NOT the official
 `org.springframework.grpc` — its only published Boot starter (1.0.3) is binary-incompatible with
