@@ -12,6 +12,7 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.context.SecurityContextHolder;
 
 import com.pm.billingservice.config.JpaConfig;
+import com.pm.billingservice.messaging.ConsumerActorContext;
 
 import io.grpc.Context;
 
@@ -45,6 +46,17 @@ class AuditorActorPropagationTest {
         Context withActor = Context.current().withValue(ActorContext.ACTOR, "grpc-user");
 
         withActor.run(() -> assertThat(auditorAware.getCurrentAuditor()).contains("grpc-user"));
+    }
+
+    @Test
+    @DisplayName("no REST/gRPC actor but a Kafka-propagated actor → the actor is stamped")
+    void kafkaActorUsedWhenNoRestOrGrpc() {
+        ConsumerActorContext.set("kafka-user");
+        try {
+            assertThat(auditorAware.getCurrentAuditor()).contains("kafka-user");
+        } finally {
+            ConsumerActorContext.clear();
+        }
     }
 
     @Test

@@ -38,12 +38,17 @@ public class PatientEventsConsumer {
     @KafkaHandler
     public void onPatientRegistered(PatientRegistered event) {
         UUID patientId = UUID.fromString(event.getPatientId());
+        // Audit the opened account as the user who registered the patient (carried on the event),
+        // not "system". Cleared in finally so it never bleeds into the next record on this thread.
+        ConsumerActorContext.set(event.getActor());
         try {
             accountService.openAccount(new OpenAccountRequestDTO(patientId, event.getCurrency()));
             log.info("Opened billing account for patient {} (event {})", patientId, event.getEventId());
         } catch (AccountAlreadyExistsException e) {
             log.info("Billing account already exists for patient {} — duplicate event {} ignored",
                     patientId, event.getEventId());
+        } finally {
+            ConsumerActorContext.clear();
         }
     }
 

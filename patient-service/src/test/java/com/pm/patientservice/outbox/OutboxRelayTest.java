@@ -43,7 +43,7 @@ class OutboxRelayTest {
 
     private OutboxEvent pendingEvent() throws Exception {
         String payload = objectMapper.writeValueAsString(new PatientRegisteredPayload(
-                UUID.randomUUID().toString(), PATIENT_ID.toString(), "USD", 1_700_000_000_000L));
+                UUID.randomUUID().toString(), PATIENT_ID.toString(), "USD", 1_700_000_000_000L, "test-actor"));
         return OutboxEvent.forPatientRegistered(PATIENT_ID, payload);
     }
 

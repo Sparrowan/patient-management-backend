@@ -7,6 +7,7 @@
     { "name": "eventId",    "type": "string", "doc": "Unique event id (UUID). The consumer's idempotency key." },
     { "name": "patientId",  "type": "string", "doc": "The registered patient's id (UUID)." },
     { "name": "currency",   "type": "string", "doc": "ISO-4217 currency for the billing account to open." },
-    { "name": "occurredAt", "type": { "type": "long", "logicalType": "timestamp-millis" }, "doc": "When registration committed." }
+    { "name": "occurredAt", "type": { "type": "long", "logicalType": "timestamp-millis" }, "doc": "When registration committed." },
+    { "name": "actor",      "type": "string", "default": "system", "doc": "Staff user (JWT sub) who initiated registration, for downstream audit attribution; 'system' if none. Not patient PHI." }
   ]
 }

@@ -171,10 +171,11 @@ cross-reference the backend-patterns catalog we're prioritizing for banking/fint
 
 - [~] **`auth-service`** — JWT issuer (Spring Security 6): `/register` + `/login` (username-or-email,
       BCrypt, DB users), RSA/RS256 tokens, JWKS endpoint. **patient-service secured** as a resource
-      server (validates against JWKS). **RBAC**, **billing secured**, and **sync gRPC identity
-      propagation** (patient→billing veto forwards the caller's `sub` as `x-actor-id` metadata → audited
-      as the real user) all done. Next: **async actor-in-event** (Kafka open-account still audits
-      `"system"`), **ABAC**/least-privilege. `[#27/#28/#29]`
+      server (validates against JWKS). **RBAC**, **billing secured**, **sync gRPC identity propagation**
+      (patient→billing veto forwards the caller's `sub` as `x-actor-id` metadata), and **async
+      actor-in-event** (`PatientRegistered` carries an `actor` field → billing audits the opened account
+      as the registering user) all done — both cross-service boundaries now attribute the real user, not
+      `"system"`. Next: **ABAC**/least-privilege. `[#27/#28/#29]`
 - [~] **Zero-trust inter-service security** (never trust the network; encrypt + authenticate +
       authorize *every* call): `[#33]`
   - [x] **mTLS** between services — app-level mTLS on the patient↔billing gRPC call (dev

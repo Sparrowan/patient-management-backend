@@ -88,6 +88,7 @@ public class OutboxRelay {
                 .setPatientId(p.patientId())
                 .setCurrency(p.currency())
                 .setOccurredAt(Instant.ofEpochMilli(p.occurredAt()))
+                .setActor(p.actor())
                 .build();
     }
 

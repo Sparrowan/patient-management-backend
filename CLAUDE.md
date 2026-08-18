@@ -309,14 +309,21 @@ compilation problems` / `No qualifying bean of type PatientMapper` at startup). 
 - [x] **Service-to-service identity propagation (sync gRPC)** — the patient→billing deletion veto now
       forwards the caller's `sub` as an `x-actor-id` gRPC metadata header (client interceptor reads the
       `SecurityContext`; server interceptor binds it to the gRPC `Context`); billing's `AuditorAware`
-      resolves **REST principal → gRPC actor → `"system"`**. So closing an account during a delete is
-      audited as the real user (`updated_by` = their UUID), verified end-to-end. Only the id is sent, not
-      the token — the mTLS channel already authenticates the caller and billing makes no authZ decision on
-      it (trusted identity assertion, not credential relay).
-- [ ] Next: **async actor-in-event** — the Kafka `PatientRegistered → open account` path still stamps
-      `created_by = "system"` (you never propagate a live token over Kafka; carry the actor as an event
-      field instead). Then gateway **rate limiting** (Redis token bucket) + **CORS**; orchestrated saga,
-      CDC (Debezium), reconciliation, relay locking.
+      resolves **REST principal → gRPC actor → Kafka actor → `"system"`**. So closing an account during a
+      delete is audited as the real user (`updated_by` = their UUID), verified end-to-end. Only the id is
+      sent, not the token — the mTLS channel already authenticates the caller and billing makes no authZ
+      decision on it (trusted identity assertion, not credential relay).
+- [x] **Actor-in-event (async Kafka)** — the counterpart for the async boundary: the `PatientRegistered`
+      Avro event carries an `actor` field (added **with a default** → backward-compatible schema evolution)
+      holding the registering user's `sub`, captured at registration. Billing's consumer binds it to a
+      `ConsumerActorContext` (a `ThreadLocal` — a Kafka handler runs synchronously on one thread, so no
+      cross-thread `Context` needed) around the account-open, cleared in `finally`. `created_by` on the
+      opened account is now the real user, not `"system"` — verified end-to-end. You **never** propagate a
+      live token over Kafka (the event may be consumed/replayed after the token expires); the durable
+      *fact* of who acted rides as event data.
+- [ ] Next: gateway **rate limiting** (Redis token bucket) + **CORS**; orchestrated saga, CDC (Debezium),
+      reconciliation, relay multi-instance safety (SKIP LOCKED/ShedLock). Background writes with no
+      originating user (schedulers) still audit `"system"` — correct.
 
 **gRPC note:** uses **net.devh `grpc-spring-boot-starter` 3.1.0** on both sides, NOT the official
 `org.springframework.grpc` — its only published Boot starter (1.0.3) is binary-incompatible with
