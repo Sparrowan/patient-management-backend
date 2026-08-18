@@ -43,9 +43,23 @@
 			<artifactId>spring-boot-starter-actuator</artifactId>
 		</dependency>
 
+		<!-- Edge JWT validation. With WebFlux on the classpath this auto-configures the *reactive*
+		     resource server (ReactiveJwtDecoder from the jwk-set-uri) — same starter as the servlet
+		     services, different runtime. Rejects unauthenticated requests at the door; services still
+		     re-validate independently (defense in depth). -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-oauth2-resource-server</artifactId>
+		</dependency>
+
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-test</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.security</groupId>
+			<artifactId>spring-security-test</artifactId>
 			<scope>test</scope>
 		</dependency>
 	</dependencies>

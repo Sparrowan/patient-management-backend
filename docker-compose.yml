@@ -244,6 +244,8 @@ services:
       AUTH_SERVICE_URI: http://auth-service:4002
       PATIENT_SERVICE_URI: http://patient-service:4000
       BILLING_SERVICE_URI: http://billing-service:4001
+      # Edge JWT validation: fetch auth's JWKS over the compose network.
+      AUTH_JWKS_URI: http://auth-service:4002/oauth2/jwks
     ports:
       - "4004:4004"
     networks:

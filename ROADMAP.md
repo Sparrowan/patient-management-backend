@@ -72,8 +72,9 @@ cross-reference the backend-patterns catalog we're prioritizing for banking/fint
 ### Platform
 
 - [~] **API Gateway** (Spring Cloud Gateway 5.0, reactive) — single entry point on `:4004`, routes
-      to all services via the `RouteLocator` DSL. Done: routing. Next: edge JWT validation, rate
-      limiting, CORS.
+      to all services via the `RouteLocator` DSL. Done: routing + **edge JWT validation** (reactive
+      `SecurityWebFilterChain` — reject unauthenticated at the door, forward the `Authorization`
+      header; services still re-validate = defense in depth). Next: rate limiting, CORS.
 - [ ] **Config Server** + **Service Discovery** (or K8s-native).
 - [x] **Containerization** — per-service multi-stage `Dockerfile` (non-root, healthcheck) + root
       `docker-compose.yml` (per-service DB). Done for `patient-service`.

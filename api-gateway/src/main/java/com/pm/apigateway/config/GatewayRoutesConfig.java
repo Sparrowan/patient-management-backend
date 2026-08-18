@@ -12,8 +12,9 @@ import org.springframework.context.annotation.Configuration;
  * {@link RouteLocator} DSL rather than YAML keeps this stable across Gateway versions (the config
  * prefix has moved between releases) and makes the routes easy to read.
  *
- * <p>Bit 1 is routing only — no auth here yet. Edge JWT validation is the next bit; services already
- * validate independently (zero-trust), so nothing is exposed in the meantime.
+ * <p>Routing only — authentication lives in {@link SecurityConfig} (edge JWT validation). Which paths
+ * are public vs. authenticated is decided there by path, so the two stay in sync: every route below
+ * except {@code auth}/{@code jwks} requires a valid token at the edge (and again at the service).
  */
 @Configuration
 public class GatewayRoutesConfig {

@@ -291,12 +291,24 @@ compilation problems` / `No qualifying bean of type PatientMapper` at startup). 
       `@PreAuthorize("hasRole('ADMIN')")` makes **deleting a patient admin-only** (`ROLE_USER` → 403).
       *Gotcha:* `@PreAuthorize` throws inside the servlet, so the global advice must map
       `AccessDeniedException` → 403 or the catch-all turns it into 500 (401 is filter-level, unaffected).
-- [x] **JPA auditing "who"** — an `AuditorAware<String>` reads the JWT `sub` from the SecurityContext
-      (`"system"` for background writes); `@CreatedBy`/`@LastModifiedBy` on `BaseEntity` now stamp
-      `created_by`/`updated_by` (patient `V6`). The audit trail finally records who did what.
-- [ ] Next: gateway **edge JWT validation** (reactive `SecurityWebFilterChain` — validate + forward);
-      secure **billing** + service-to-service token propagation (billing writes have no principal yet
-      — auditor would be `"system"`); then orchestrated saga, CDC (Debezium), reconciliation, relay locking.
+- [x] **JPA auditing "who"** (patient **and** billing) — an `AuditorAware<String>` reads the JWT `sub`
+      from the SecurityContext (`"system"` for background writes: Kafka consumer/gRPC/schedulers);
+      `@CreatedBy`/`@LastModifiedBy` on `BaseEntity` stamp `created_by`/`updated_by` (patient `V6`,
+      billing `V3`). Billing's `LedgerEntry` extends `BaseEntity`, so **every money movement records
+      who performed it**. The token `sub` is the user's **UUID**, not the username — a stable,
+      never-reassigned id so the audit reference doesn't rot on a rename (OIDC); a separate
+      `preferred_username` claim carries the display name (`AppUserDetails` threads the id into `TokenService`).
+- [x] **billing-service secured as a resource server** — same JWKS-validating, stateless setup as
+      patient; money movement (credit/debit) is **admin-only** (`@PreAuthorize`), so a frontend can
+      safely read account data while writes stay gated.
+- [x] **api-gateway edge JWT validation** — reactive `SecurityWebFilterChain`/`ServerHttpSecurity`
+      (the WebFlux mirror of the servlet resource-server config): unauthenticated requests are rejected
+      at `:4004` before routing (auth routes + JWKS + actuator stay public), and the `Authorization`
+      header is forwarded so **services still re-validate** (defense in depth). Edge does authN;
+      per-role authZ (`@PreAuthorize`) stays at the services.
+- [ ] Next: gateway **rate limiting** (Redis token bucket) + **CORS**; service-to-service token
+      propagation (billing writes triggered by Kafka have no principal yet — auditor is `"system"`);
+      then orchestrated saga, CDC (Debezium), reconciliation, relay locking.
 
 **gRPC note:** uses **net.devh `grpc-spring-boot-starter` 3.1.0** on both sides, NOT the official
 `org.springframework.grpc` — its only published Boot starter (1.0.3) is binary-incompatible with
