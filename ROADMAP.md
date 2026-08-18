@@ -101,9 +101,15 @@ cross-reference the backend-patterns catalog we're prioritizing for banking/fint
 - [ ] **Keyset (cursor) pagination** for large history endpoints (offset is fine for now). `[#24]`
 - [ ] **Read/write splitting** across replicas — most traffic is reads; route `@Transactional(readOnly=true)`
       to replicas via `AbstractRoutingDataSource`, or transparently with **ShardingSphere-JDBC**. `[#20]`
-- [ ] **Connection-pool tuning** (HikariCP) — pool size is a scale lever (and a footgun): total
-      connections across all replicas must stay under the DB's `max_connections`. Right-size per
-      service before adding replicas.
+- [ ] **Connection-pool tuning** (HikariCP) — pool size is a scale lever (and a footgun). The pool
+      is the *cure* for "too many connections" (it caps + reuses), not the cause. Watch the math:
+      `replicas × pool_max_size < max_connections − headroom(~10)`. Today: default pool 10 vs MariaDB
+      `max_connections=151` → ~7% used, a non-issue until ~15 replicas of one service; DB-per-service
+      isolates the blast radius, and `open-in-view=false` frees connections right after the service
+      method. **Bigger pool ≠ better** — small pools (10–20) usually outperform large ones (the DB's
+      concurrency is bounded); right-size, don't inflate. Note the pessimistic money-movement lock
+      holds its connection for the whole txn. At high replica counts, add a **connection proxy**
+      (ProxySQL) that multiplexes many app connections onto fewer DB ones; set `leakDetectionThreshold`.
 - [ ] **CDN / edge caching** — front the gateway with a CDN (CloudFront/Cloudflare) for TLS
       termination, geo-routing, DDoS absorption, and edge-caching cacheable `GET`s (honoring the
       existing `ETag`/`Cache-Control`). PHI responses stay `no-store`; the win here is static/public
