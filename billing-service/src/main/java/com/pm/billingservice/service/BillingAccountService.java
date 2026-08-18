@@ -42,9 +42,10 @@ public interface BillingAccountService {
     PagedResponse<LedgerEntryResponseDTO> getLedger(UUID accountId, Pageable pageable);
 
     /**
-     * Deactivates a patient's account when the patient is deleted (a cross-service saga step):
-     * closes it if empty, otherwise suspends it pending settlement — financial history is never
-     * deleted. Idempotent.
+     * Deactivates a patient's account, invoked by the synchronous deletion veto
+     * ({@code CloseAccountForPatient} gRPC): closes it if empty, otherwise throws
+     * {@link com.pm.billingservice.exception.AccountHasBalanceException} to veto the delete (a funded
+     * account must settle first) — financial history is never deleted. Idempotent.
      *
      * @throws com.pm.billingservice.exception.BillingAccountNotFoundException if the patient has none
      */

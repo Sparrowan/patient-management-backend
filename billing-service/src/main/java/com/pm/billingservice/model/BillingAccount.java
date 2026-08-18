@@ -91,9 +91,10 @@ public class BillingAccount extends BaseEntity {
     /**
      * Deactivates the account when its patient is removed. You cannot close an account that still
      * holds money (a real bank rule): a funded account throws {@link AccountHasBalanceException},
-     * which the deletion saga turns into a compensating {@code PatientDeletionRejected} (the patient
-     * is then restored). An empty account is {@link AccountStatus#CLOSED}. Idempotent: a no-op once
-     * already closed, so a redelivered {@code PatientDeleted} changes nothing.
+     * which the synchronous deletion veto ({@code CloseAccountForPatient} gRPC) surfaces as
+     * {@code FAILED_PRECONDITION} → the patient delete is rejected with 409 (settle first), leaving
+     * the patient untouched. An empty account is {@link AccountStatus#CLOSED}. Idempotent: a no-op
+     * once already closed, so a retried veto call changes nothing.
      */
     public void deactivate() {
         if (status == AccountStatus.CLOSED) {
