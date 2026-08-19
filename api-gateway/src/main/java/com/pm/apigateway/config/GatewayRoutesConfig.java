@@ -1,8 +1,14 @@
 package com.pm.apigateway.config;
 
+import java.util.function.Function;
+
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.cloud.gateway.filter.ratelimit.KeyResolver;
+import org.springframework.cloud.gateway.filter.ratelimit.RedisRateLimiter;
 import org.springframework.cloud.gateway.route.RouteLocator;
+import org.springframework.cloud.gateway.route.builder.GatewayFilterSpec;
 import org.springframework.cloud.gateway.route.builder.RouteLocatorBuilder;
+import org.springframework.cloud.gateway.route.builder.UriSpec;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -15,6 +21,8 @@ import org.springframework.context.annotation.Configuration;
  * <p>Routing only — authentication lives in {@link SecurityConfig} (edge JWT validation). Which paths
  * are public vs. authenticated is decided there by path, so the two stay in sync: every route below
  * except {@code auth}/{@code jwks} requires a valid token at the edge (and again at the service).
+ * Every route also carries the {@code RequestRateLimiter} filter (Redis token bucket — see
+ * {@link RateLimitConfig}).
  */
 @Configuration
 public class GatewayRoutesConfig {
@@ -33,12 +41,19 @@ public class GatewayRoutesConfig {
     }
 
     @Bean
-    public RouteLocator routes(RouteLocatorBuilder builder) {
+    public RouteLocator routes(
+            RouteLocatorBuilder builder, RedisRateLimiter rateLimiter, KeyResolver keyResolver) {
+        // Applied to every route so no path can outrun the edge limiter.
+        Function<GatewayFilterSpec, UriSpec> rateLimit = f -> f.requestRateLimiter(
+                c -> c.setRateLimiter(rateLimiter).setKeyResolver(keyResolver));
         return builder.routes()
                 // auth-service: login/register + the JWKS the resource servers fetch.
-                .route("auth", r -> r.path("/api/v1/auth/**", "/oauth2/jwks").uri(authUri))
-                .route("patients", r -> r.path("/api/v1/patients/**").uri(patientUri))
-                .route("billing", r -> r.path("/api/v1/billing-accounts/**").uri(billingUri))
+                .route("auth", r -> r.path("/api/v1/auth/**", "/oauth2/jwks")
+                        .filters(rateLimit).uri(authUri))
+                .route("patients", r -> r.path("/api/v1/patients/**")
+                        .filters(rateLimit).uri(patientUri))
+                .route("billing", r -> r.path("/api/v1/billing-accounts/**")
+                        .filters(rateLimit).uri(billingUri))
                 .build();
     }
 }

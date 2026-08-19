@@ -45,4 +45,15 @@ class GatewayEdgeAuthTest {
                 .exchange()
                 .expectStatus().isOk();
     }
+
+    @Test
+    @DisplayName("CORS preflight from the allowed origin is answered before auth (no 401, echoes the origin)")
+    void corsPreflightAllowed() {
+        webTestClient.options().uri("/api/v1/patients")
+                .header("Origin", "http://localhost:3000")
+                .header("Access-Control-Request-Method", "GET")
+                .exchange()
+                .expectStatus().isOk()
+                .expectHeader().valueEquals("Access-Control-Allow-Origin", "http://localhost:3000");
+    }
 }

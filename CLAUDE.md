@@ -321,9 +321,16 @@ compilation problems` / `No qualifying bean of type PatientMapper` at startup). 
       opened account is now the real user, not `"system"` — verified end-to-end. You **never** propagate a
       live token over Kafka (the event may be consumed/replayed after the token expires); the durable
       *fact* of who acted rides as event data.
-- [ ] Next: gateway **rate limiting** (Redis token bucket) + **CORS**; orchestrated saga, CDC (Debezium),
-      reconciliation, relay multi-instance safety (SKIP LOCKED/ShedLock). Background writes with no
-      originating user (schedulers) still audit `"system"` — correct.
+- [x] **Gateway rate limiting + CORS** — Spring Cloud Gateway's `RequestRateLimiter` on every route,
+      backed by a **Redis token bucket** (`RedisRateLimiter`: replenish 10/s, burst 20; state in Redis
+      *because* the gateway is stateless, so the limit holds across replicas). Keyed **per user (`sub`)
+      when authenticated, else client IP** (brute-force cover where there's no principal). **CORS** is
+      owned by the gateway (single entry point) and wired **into** the reactive security chain so the
+      preflight `OPTIONS` is answered before the token check; `allowCredentials=true` so origins are an
+      explicit allowlist, never `*`. Verified live: 429 on burst (IP and per-user), preflight allow/deny.
+- [ ] Next: orchestrated saga, CDC (Debezium), reconciliation, relay multi-instance safety
+      (SKIP LOCKED/ShedLock). Background writes with no originating user (schedulers) still audit
+      `"system"` — correct.
 
 **gRPC note:** uses **net.devh `grpc-spring-boot-starter` 3.1.0** on both sides, NOT the official
 `org.springframework.grpc` — its only published Boot starter (1.0.3) is binary-incompatible with

@@ -226,6 +226,18 @@ services:
     networks:
       - patient-net
 
+  # --- redis (edge rate-limiter token-bucket store for the gateway) ---------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - patient-net
+
   # --- api-gateway (single entry point; routes to every service) ------------------------------
   api-gateway:
     build:
@@ -239,6 +251,8 @@ services:
         condition: service_started
       billing-service:
         condition: service_started
+      redis:
+        condition: service_healthy
     environment:
       # Downstream services by their in-network hostnames.
       AUTH_SERVICE_URI: http://auth-service:4002
@@ -246,6 +260,9 @@ services:
       BILLING_SERVICE_URI: http://billing-service:4001
       # Edge JWT validation: fetch auth's JWKS over the compose network.
       AUTH_JWKS_URI: http://auth-service:4002/oauth2/jwks
+      # Rate limiter's Redis + the browser origin(s) allowed through CORS.
+      REDIS_HOST: redis
+      GATEWAY_CORS_ALLOWED_ORIGINS: http://localhost:3000
     ports:
       - "4004:4004"
     networks:

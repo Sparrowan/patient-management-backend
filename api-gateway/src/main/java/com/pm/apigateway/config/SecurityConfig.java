@@ -6,6 +6,7 @@ import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.reactive.EnableWebFluxSecurity;
 import org.springframework.security.config.web.server.ServerHttpSecurity;
 import org.springframework.security.web.server.SecurityWebFilterChain;
+import org.springframework.web.cors.reactive.CorsConfigurationSource;
 
 /**
  * Edge JWT validation. The gateway now rejects a request with no/invalid token at the door (:4004)
@@ -34,8 +35,11 @@ import org.springframework.security.web.server.SecurityWebFilterChain;
 public class SecurityConfig {
 
     @Bean
-    public SecurityWebFilterChain securityWebFilterChain(ServerHttpSecurity http) {
+    public SecurityWebFilterChain securityWebFilterChain(
+            ServerHttpSecurity http, CorsConfigurationSource corsConfigurationSource) {
         return http
+                // CORS handled here so Security answers the preflight OPTIONS before the token check.
+                .cors(cors -> cors.configurationSource(corsConfigurationSource))
                 // No session cookie to protect — only a bearer token — so CSRF doesn't apply.
                 .csrf(ServerHttpSecurity.CsrfSpec::disable)
                 .authorizeExchange(exchange -> exchange
