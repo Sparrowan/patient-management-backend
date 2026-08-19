@@ -67,14 +67,19 @@ cross-reference the backend-patterns catalog we're prioritizing for banking/fint
       a **new synchronous** inter-service call needs it (e.g. a future gRPC query). The reasoning
       still holds: TimeLimiter only where an async/`Future` return exists; Bulkhead where concurrency
       isn't already bounded. `[#7/#11/#12]`
-- [ ] **Rate limiting** (token bucket) at the gateway + **load shedding**. `[#2/#8]`
+- [x] **Rate limiting** — Gateway `RequestRateLimiter` on every route, **Redis token bucket**
+      (`RedisRateLimiter`, replenish/burst), keyed per user (`sub`) else client IP. State lives in Redis
+      so the limit holds across (stateless) gateway replicas. Still to add: **load shedding** +
+      stricter per-endpoint limits (e.g. tighter on `/login`). `[#2/#8]`
 
 ### Platform
 
 - [~] **API Gateway** (Spring Cloud Gateway 5.0, reactive) — single entry point on `:4004`, routes
       to all services via the `RouteLocator` DSL. Done: routing + **edge JWT validation** (reactive
       `SecurityWebFilterChain` — reject unauthenticated at the door, forward the `Authorization`
-      header; services still re-validate = defense in depth). Next: rate limiting, CORS.
+      header; services still re-validate = defense in depth) + **Redis-backed rate limiting** (token
+      bucket, per user/IP) + **CORS** (allowlist, wired into the security chain). Next: Config Server /
+      service discovery, load shedding.
 - [ ] **Config Server** + **Service Discovery** (or K8s-native).
 - [x] **Containerization** — per-service multi-stage `Dockerfile` (non-root, healthcheck) + root
       `docker-compose.yml` (per-service DB). Done for `patient-service`.

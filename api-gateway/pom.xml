@@ -52,6 +52,14 @@
 			<artifactId>spring-boot-starter-oauth2-resource-server</artifactId>
 		</dependency>
 
+		<!-- Reactive Redis — the distributed token-bucket store behind Gateway's RequestRateLimiter.
+		     The rate-limit counter MUST live outside the (stateless) gateway so the limit holds across
+		     replicas; Redis is the shared, atomic (Lua-scripted) counter. -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-data-redis-reactive</artifactId>
+		</dependency>
+
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-test</artifactId>
