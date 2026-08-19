@@ -11,6 +11,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 
 import com.pm.billingservice.grpc.ActorContext;
+import com.pm.billingservice.messaging.ConsumerActorContext;
 
 /**
  * JPA auditing. {@code @CreatedDate}/{@code @LastModifiedDate} + {@code @CreatedBy}/
@@ -26,12 +27,14 @@ public class JpaConfig {
      * <ol>
      *   <li>the JWT subject on an authenticated REST call (e.g. an admin crediting an account);</li>
      *   <li>else the actor propagated over gRPC (e.g. the user who triggered a delete → account close),
-     *       read from the gRPC {@link ActorContext};</li>
-     *   <li>else {@code "system"} — the Kafka consumer opening an account, or schedulers, which have
-     *       no originating principal.</li>
+     *       from the gRPC {@link ActorContext};</li>
+     *   <li>else the actor carried on a Kafka event (e.g. the user who registered the patient whose
+     *       account is being opened), from the {@link ConsumerActorContext};</li>
+     *   <li>else {@code "system"} — schedulers and anything with no originating principal.</li>
      * </ol>
-     * A REST call runs on a servlet thread (SecurityContext set, gRPC context empty); a gRPC call runs
-     * on a gRPC thread (the reverse) — so the two sources never collide.
+     * Each entry point runs on its own thread and populates only its own source, so they never collide:
+     * REST → servlet thread (SecurityContext), gRPC → gRPC thread (gRPC context), Kafka → listener
+     * thread (thread-local).
      */
     @Bean
     public AuditorAware<String> auditorAware() {
@@ -42,7 +45,9 @@ public class JpaConfig {
                     && !(authentication instanceof AnonymousAuthenticationToken)) {
                 return Optional.of(authentication.getName());
             }
-            return Optional.of(ActorContext.currentActor().orElse("system"));
+            return Optional.of(ActorContext.currentActor()
+                    .or(ConsumerActorContext::current)
+                    .orElse("system"));
         };
     }
 }

@@ -57,6 +57,8 @@ class PatientServiceImplTest {
     @Mock private PatientMapper patientMapper;
     @Mock private OutboxEventRepository outboxRepository;
     @Mock private BillingGrpcClient billingGrpcClient;
+    // Default Mockito answer for an Optional-returning method is Optional.empty() → actor "system".
+    @Mock private org.springframework.data.domain.AuditorAware<String> auditorAware;
     // Real ObjectMapper (spy) so the outbox payload is actually serialized, as in production.
     @Spy private ObjectMapper objectMapper = new ObjectMapper();
     @InjectMocks private PatientServiceImpl patientService;

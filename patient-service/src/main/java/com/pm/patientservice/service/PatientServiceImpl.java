@@ -18,6 +18,8 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
 import java.util.UUID;
+import org.springframework.data.domain.AuditorAware;
+
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Pageable;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
@@ -36,6 +38,7 @@ public class PatientServiceImpl implements PatientService {
     private final OutboxEventRepository outboxRepository;
     private final ObjectMapper objectMapper;
     private final BillingGrpcClient billingGrpcClient;
+    private final AuditorAware<String> auditorAware;
 
     @Override
     @Transactional(readOnly = true)
@@ -69,13 +72,23 @@ public class PatientServiceImpl implements PatientService {
     /** Serializes the {@code PatientRegistered} payload stored in the outbox row (ids only, no PHI). */
     private String registeredPayload(UUID patientId) {
         PatientRegisteredPayload payload = new PatientRegisteredPayload(
-                UUID.randomUUID().toString(), patientId.toString(), DEFAULT_CURRENCY, Instant.now().toEpochMilli());
+                UUID.randomUUID().toString(), patientId.toString(), DEFAULT_CURRENCY,
+                Instant.now().toEpochMilli(), currentActor());
         try {
             return objectMapper.writeValueAsString(payload);
         } catch (JsonProcessingException e) {
             // A record of String/long fields cannot realistically fail to serialize.
             throw new IllegalStateException("Failed to serialize PatientRegistered payload", e);
         }
+    }
+
+    /**
+     * The staff user registering the patient — captured now (inside the request, principal present)
+     * and carried on the event so billing audits the account it later opens as this user, not
+     * {@code "system"}. Reuses the same resolution as JPA auditing (JWT sub, else {@code "system"}).
+     */
+    private String currentActor() {
+        return auditorAware.getCurrentAuditor().orElse("system");
     }
 
     /** Serializes the {@code PatientDeleted} payload stored in the outbox row (ids only, no PHI). */

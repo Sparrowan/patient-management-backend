@@ -14,6 +14,7 @@ import com.pm.events.PatientDeleted;
 import com.pm.events.PatientRegistered;
 import java.time.Instant;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -78,5 +79,27 @@ class PatientEventsConsumerTest {
         consumer.onPatientDeleted(deleted());
 
         verifyNoInteractions(accountService);
+    }
+
+    @Test
+    @DisplayName("opens the account with the event's actor bound for auditing, then clears it")
+    void bindsActorForAuditing() {
+        PatientRegistered event = PatientRegistered.newBuilder()
+                .setEventId(UUID.randomUUID().toString())
+                .setPatientId(PATIENT_ID.toString())
+                .setCurrency("USD")
+                .setOccurredAt(Instant.ofEpochMilli(1_700_000_000_000L))
+                .setActor("registrar-user")
+                .build();
+        AtomicReference<String> boundDuringOpen = new AtomicReference<>();
+        when(accountService.openAccount(any())).thenAnswer(inv -> {
+            boundDuringOpen.set(ConsumerActorContext.current().orElse(null));
+            return null;
+        });
+
+        consumer.onPatientRegistered(event);
+
+        assertThat(boundDuringOpen.get()).isEqualTo("registrar-user");
+        assertThat(ConsumerActorContext.current()).isEmpty(); // cleared in finally
     }
 }
