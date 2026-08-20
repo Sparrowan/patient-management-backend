@@ -14,11 +14,14 @@ RUN mkdir -p /root/.m2 && printf '<?xml version="1.0" encoding="UTF-8"?>\n\
   </toolchain>\n\
 </toolchains>\n' "$JAVA_HOME" > /root/.m2/toolchains.xml
 
+# The BuildKit cache mount persists the Maven repository across builds, so a pom change re-runs
+# Maven but downloads only the *newly added* artifacts — the rest are served from the warm cache.
+# Mount only the `repository` subdir, not all of ~/.m2, so the toolchains.xml above isn't shadowed.
 COPY pom.xml .
-RUN mvn -q -B dependency:go-offline
+RUN --mount=type=cache,target=/root/.m2/repository mvn -q -B dependency:go-offline
 
 COPY src ./src
-RUN mvn -q -B clean package -DskipTests
+RUN --mount=type=cache,target=/root/.m2/repository mvn -q -B clean package -DskipTests
 
 # ---- Runtime stage: slim JRE, non-root, health-checked ----
 FROM eclipse-temurin:17-jre-jammy AS runtime
