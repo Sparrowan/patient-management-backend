@@ -31,8 +31,15 @@ import lombok.RequiredArgsConstructor;
  * <p>A per-row {@code try/catch} keeps one bad row from rolling back the rest of the batch; a
  * failed send just bumps {@code attempts} and leaves the row unpublished for the next tick.
  *
- * <p>Polling (not CDC) is the deliberate starting point — simple, no extra infra. Debezium/CDC is
- * the scale evolution; multi-instance relay safety (SKIP LOCKED / ShedLock) is a follow-up. See ROADMAP.
+ * <p><b>Multi-instance safe.</b> The batch is claimed with a {@code SELECT … FOR UPDATE SKIP LOCKED}
+ * (see {@link OutboxEventRepository#lockUnpublishedBatch}), so N relays across N replicas each grab a
+ * disjoint batch and publish in parallel — no double-publish, no blocking. The claim is held for the
+ * whole {@code @Transactional} (including the Kafka sends), which briefly does network I/O under a row
+ * lock; that's acceptable because the lock only excludes <em>other relays</em> (which skip, not block),
+ * and each send is bounded by {@code SEND_TIMEOUT_SECONDS}.
+ *
+ * <p>Polling (not CDC) is the deliberate starting point — simple, no extra infra. Debezium/CDC is the
+ * scale evolution. See ROADMAP.
  */
 @Component
 @RequiredArgsConstructor
@@ -40,6 +47,7 @@ public class OutboxRelay {
 
     private static final Logger log = LoggerFactory.getLogger(OutboxRelay.class);
     private static final long SEND_TIMEOUT_SECONDS = 5;
+    private static final int BATCH_SIZE = 100;
 
     private final OutboxEventRepository outboxRepository;
     // Object value type: the relay publishes more than one Avro record type (PatientRegistered,
@@ -51,7 +59,7 @@ public class OutboxRelay {
     @Scheduled(fixedDelayString = "${outbox.relay.poll-interval-ms:1000}")
     @Transactional
     public void publishPending() {
-        List<OutboxEvent> batch = outboxRepository.findTop100ByPublishedAtIsNullOrderByCreatedAtAsc();
+        List<OutboxEvent> batch = outboxRepository.lockUnpublishedBatch(BATCH_SIZE);
         for (OutboxEvent event : batch) {
             try {
                 publish(event);
