@@ -48,6 +48,10 @@ public class LedgerEntry extends BaseEntity {
     @Column(length = 255)
     private String description;
 
+    /** Set only on the two legs of a {@link Transfer}, linking them; null for a plain credit/debit. */
+    @Column
+    private UUID transferId;
+
     protected LedgerEntry() {
     }
 
@@ -75,5 +79,19 @@ public class LedgerEntry extends BaseEntity {
             String idempotencyKey,
             String description) {
         return new LedgerEntry(accountId, type, amount, balanceAfter, idempotencyKey, description);
+    }
+
+    /** Records one leg of a transfer — same as {@link #record} but tagged with the {@code transferId}. */
+    public static LedgerEntry transferLeg(
+            UUID accountId,
+            EntryType type,
+            BigDecimal amount,
+            BigDecimal balanceAfter,
+            String idempotencyKey,
+            String description,
+            UUID transferId) {
+        LedgerEntry entry = new LedgerEntry(accountId, type, amount, balanceAfter, idempotencyKey, description);
+        entry.transferId = transferId;
+        return entry;
     }
 }
