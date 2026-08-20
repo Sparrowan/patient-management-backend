@@ -168,10 +168,15 @@ cross-reference the backend-patterns catalog we're prioritizing for banking/fint
       account or vetoes a funded one (→ 409); `PatientDeleted` is fan-out only. *(An async
       choreographed **compensation saga** was built first — billing rejects → patient restores — then
       replaced by the sync veto for better UX; the flip-flop it removed and the history live in git.)*
-      Money can't move on a non-`ACTIVE` account. Still to add: an **orchestrated** saga with a
-      coordinator (e.g. transfer = debit + credit with rollback) for a genuinely multi-step
-      transaction; a **reconciliation job** for the accepted register→delete race (empty orphaned
-      account when async open lands after a sync delete). `[#56]`
+      Money can't move on a non-`ACTIVE` account. **A same-DB money transfer is done as a local ACID
+      transaction** (debit + credit + double-entry in one tx) — *not* a saga, because ACID spans both
+      accounts; a saga would be over-engineering here. **The evolution path** (when a transfer gains a
+      slow/external leg it can't span in one tx): `Transfer.status` goes `COMPLETED` → `PENDING` +
+      async worker (kick it off reliably via the **outbox**, or poll `PENDING` rows with **SKIP
+      LOCKED** — the DB as job queue; RabbitMQ only if you need delay/priority/DLQ) → **orchestrated
+      saga** with a coordinator + compensation (`FAILED`/`REVERSED`). Still to add: that orchestrated
+      saga, and a **reconciliation job** for the accepted register→delete race (empty orphaned account
+      when async open lands after a sync delete). `[#56]`
 - [x] **Immutable ledger** for billing — append-only `ledger_entries` (each money movement with
       `balanceAfter`); full event-sourcing/double-entry is a later evolution. `[#53]`
 - [ ] **CDC streaming** for reconciliation/reporting. `[#99]`
@@ -209,7 +214,9 @@ platform/compliance teams own it, but design compatibly and be able to speak to 
 
 - [x] **Money as `BigDecimal` — never `double`/`float`** — `billing-service` balance is
       `DECIMAL(19,2)` with a currency. Explicit rounding modes land with credit/debit. `[code]`
-- [ ] **Double-entry / balanced ledger** — every debit has a matching credit. `[code]`
+- [~] **Double-entry / balanced ledger** — a **transfer** writes a matched DEBIT + CREDIT pair linked
+      by `transfer_id`, so the ledger stays balanced. Still to generalize: every movement (not just
+      transfers) as balanced entries, plus a trial-balance/invariant check. `[code]`
 - [ ] **Reconciliation** jobs (end-of-day, vs external systems) + **FX / multi-currency**. `[code]`
 - [ ] **Transaction limits & velocity checks** (fraud/AML gating). `[code]`
 

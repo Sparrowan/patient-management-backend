@@ -339,8 +339,18 @@ compilation problems` / `No qualifying bean of type PatientMapper` at startup). 
       concurrent-transaction integration test; SKIP LOCKED correctness relies on the
       `idx_outbox_unpublished` index (else the DB over-locks). *(Chose SKIP LOCKED over ShedLock:
       both relays work in parallel vs. only one active; no extra dependency.)*
-- [ ] Next: orchestrated saga, CDC (Debezium), reconciliation. Background writes with no originating
-      user (schedulers) still audit `"system"` — correct.
+- [x] **Money transfer (first-class `Transfer` aggregate)** — `POST /api/v1/billing-accounts/transfers`,
+      admin-only, `Idempotency-Key`. A **local ACID** transaction (both accounts in one DB — deliberately
+      *not* a saga): **double-entry** (linked DEBIT+CREDIT ledger legs sharing a `transfer_id`),
+      transfer-level idempotency (unique key + replay), and the two concurrency concerns a single
+      credit/debit lacks — **deadlock-safe lock ordering** (lock both accounts by id order, so opposing
+      `A→B`/`B→A` transfers can't cycle) and **`READ_COMMITTED` isolation** (MariaDB's default REPEATABLE
+      READ + `SELECT … FOR UPDATE` throws error 1020 "record has changed" under concurrent modification;
+      READ COMMITTED locks the latest committed row). `TransferStatus` is a seam: a same-DB transfer is
+      always `COMPLETED`; a future slow/external transfer becomes `PENDING` + async worker, then an
+      orchestrated saga (`FAILED`/`REVERSED` compensation) — see ROADMAP.
+- [ ] Next: orchestrated saga (the async/cross-boundary transfer evolution), CDC (Debezium),
+      reconciliation. Background writes with no originating user (schedulers) still audit `"system"`.
 
 **gRPC note:** uses **net.devh `grpc-spring-boot-starter` 3.1.0** on both sides, NOT the official
 `org.springframework.grpc` — its only published Boot starter (1.0.3) is binary-incompatible with

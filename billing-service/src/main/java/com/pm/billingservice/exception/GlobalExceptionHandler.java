@@ -50,6 +50,14 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         return problem;
     }
 
+    @ExceptionHandler(CurrencyMismatchException.class)
+    public ProblemDetail handleCurrencyMismatch(CurrencyMismatchException ex) {
+        ProblemDetail problem =
+                ProblemDetail.forStatusAndDetail(HttpStatus.UNPROCESSABLE_ENTITY, ex.getMessage());
+        problem.setTitle("Currency mismatch");
+        return problem;
+    }
+
     @ExceptionHandler(AccountNotActiveException.class)
     public ProblemDetail handleAccountNotActive(AccountNotActiveException ex) {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
