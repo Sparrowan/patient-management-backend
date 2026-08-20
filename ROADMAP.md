@@ -100,9 +100,9 @@ cross-reference the backend-patterns catalog we're prioritizing for banking/fint
 - [x] **Stateless services** — the enabler for everything else. All services are
       `SessionCreationPolicy.STATELESS` with JWTs verified locally against JWKS (no server session,
       no sticky sessions); all durable state lives in the DB / Kafka / outbox. So any replica serves
-      any request → scale out by adding pods. *(One current blocker to running >1 patient-service
-      replica: the `@Scheduled OutboxRelay` isn't multi-instance-safe yet — see the SKIP LOCKED/
-      ShedLock item under Event-driven.)*
+      any request → scale out by adding pods. *(The former blocker — the `@Scheduled OutboxRelay` —
+      is now multi-instance-safe via `FOR UPDATE SKIP LOCKED`, so >1 patient-service replica is safe;
+      see Event-driven.)*
 - [ ] **Keyset (cursor) pagination** for large history endpoints (offset is fine for now). `[#24]`
 - [ ] **Read/write splitting** across replicas — most traffic is reads; route `@Transactional(readOnly=true)`
       to replicas via `AbstractRoutingDataSource`, or transparently with **ShardingSphere-JDBC**. `[#20]`
@@ -156,9 +156,13 @@ cross-reference the backend-patterns catalog we're prioritizing for banking/fint
       (`outbox_events` + `@Scheduled OutboxRelay`, at-least-once); `billing` consumes it and opens the
       account idempotently (duplicate → success), with `patient-events.DLT` for poison/exhausted
       records. Replaced the best-effort gRPC trigger. **kafka-ui** on `:8080` for inspection. `[#55/#52]`
-  - Still to layer on: **CDC (Debezium)** to replace the polling relay; **multi-instance relay
-    safety** (`SELECT … FOR UPDATE SKIP LOCKED` or ShedLock — ties into Distributed locks below);
-    an **outbox reaper** (purge/alert on old published/failed rows).
+  - **Multi-instance relay safety — done.** The relay claims each batch with a native
+    `SELECT … FOR UPDATE SKIP LOCKED` (`lockUnpublishedBatch`), so relays on N replicas grab disjoint
+    batches (skip, not block; no double-publish). Chosen over ShedLock (parallel vs. single-active, no
+    new dependency). Correctness depends on `idx_outbox_unpublished` (else the DB filesorts and
+    over-locks); proven by a concurrent-transaction integration test.
+  - Still to layer on: **CDC (Debezium)** to replace the polling relay; an **outbox reaper**
+    (purge/alert on old published/failed rows).
 - [~] **Cross-service consistency** — "gate synchronously, propagate asynchronously." Patient
       deletion is a **synchronous gRPC veto** (`CloseAccountForPatient`): billing closes an empty
       account or vetoes a funded one (→ 409); `PatientDeleted` is fan-out only. *(An async

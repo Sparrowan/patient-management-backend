@@ -178,8 +178,12 @@ com.pm.<service>/
   a crash between them loses the event). The event is written to an `outbox_events` row **in the
   same transaction** as the business change; a `@Scheduled` **`OutboxRelay`** ships unpublished rows
   to Kafka and stamps `published_at`. Delivery is **at-least-once**; combined with an idempotent
-  consumer it's effectively exactly-once. Relay uses a bounded oldest-first poll; multi-instance
-  safety (`SKIP LOCKED`/ShedLock) and CDC (Debezium) are the scale evolutions — see ROADMAP.
+  consumer it's effectively exactly-once. Relay claims each batch with a native **`SELECT … FOR
+  UPDATE SKIP LOCKED`** (`OutboxEventRepository.lockUnpublishedBatch`), so it's **multi-instance
+  safe**: N relays across N replicas each grab a *disjoint* batch (a second relay skips the locked
+  rows, never blocks or double-publishes) and the claim is held until the tx commits. Correct
+  row-precise locking depends on the `idx_outbox_unpublished` index — without it the DB filesorts and
+  over-locks the batch. CDC (Debezium) is the further scale evolution — see ROADMAP.
 - **Avro + Schema Registry** is the wire contract. The `.avsc` is **copied per service** (same
   independent-services trade-off as `billing.proto`); each generates its own class via
   `avro-maven-plugin` (`stringType=String`). Confluent images run **KRaft** (no ZooKeeper).
@@ -328,9 +332,15 @@ compilation problems` / `No qualifying bean of type PatientMapper` at startup). 
       owned by the gateway (single entry point) and wired **into** the reactive security chain so the
       preflight `OPTIONS` is answered before the token check; `allowCredentials=true` so origins are an
       explicit allowlist, never `*`. Verified live: 429 on burst (IP and per-user), preflight allow/deny.
-- [ ] Next: orchestrated saga, CDC (Debezium), reconciliation, relay multi-instance safety
-      (SKIP LOCKED/ShedLock). Background writes with no originating user (schedulers) still audit
-      `"system"` — correct.
+- [x] **Multi-instance-safe outbox relay** — the relay claims its batch with a native
+      `SELECT … FOR UPDATE SKIP LOCKED` (`lockUnpublishedBatch`), so N patient-service replicas each
+      run a relay that grabs a *disjoint* batch — no double-publish, no blocking — which unblocks
+      horizontal scale-out (the last thing that made the relay single-instance). Proven by a
+      concurrent-transaction integration test; SKIP LOCKED correctness relies on the
+      `idx_outbox_unpublished` index (else the DB over-locks). *(Chose SKIP LOCKED over ShedLock:
+      both relays work in parallel vs. only one active; no extra dependency.)*
+- [ ] Next: orchestrated saga, CDC (Debezium), reconciliation. Background writes with no originating
+      user (schedulers) still audit `"system"` — correct.
 
 **gRPC note:** uses **net.devh `grpc-spring-boot-starter` 3.1.0** on both sides, NOT the official
 `org.springframework.grpc` — its only published Boot starter (1.0.3) is binary-incompatible with

@@ -2,6 +2,7 @@ package com.pm.patientservice.outbox;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
@@ -57,7 +58,7 @@ class OutboxRelayTest {
     @DisplayName("publishes an unpublished event keyed by patientId and marks it published")
     void publishesAndMarks() throws Exception {
         OutboxEvent event = pendingEvent();
-        when(outboxRepository.findTop100ByPublishedAtIsNullOrderByCreatedAtAsc()).thenReturn(List.of(event));
+        when(outboxRepository.lockUnpublishedBatch(anyInt())).thenReturn(List.of(event));
         CompletableFuture<SendResult<String, Object>> ok = CompletableFuture.completedFuture(null);
         when(kafkaTemplate.send(eq(TOPIC), eq(PATIENT_ID.toString()), any(PatientRegistered.class)))
                 .thenReturn(ok);
@@ -73,7 +74,7 @@ class OutboxRelayTest {
     @DisplayName("routes a PatientDeleted row to the patient-events topic as a PatientDeleted record")
     void publishesDeletedEvent() throws Exception {
         OutboxEvent event = pendingDeletedEvent();
-        when(outboxRepository.findTop100ByPublishedAtIsNullOrderByCreatedAtAsc()).thenReturn(List.of(event));
+        when(outboxRepository.lockUnpublishedBatch(anyInt())).thenReturn(List.of(event));
         CompletableFuture<SendResult<String, Object>> ok = CompletableFuture.completedFuture(null);
         when(kafkaTemplate.send(eq("patient-events"), eq(PATIENT_ID.toString()), any(PatientDeleted.class)))
                 .thenReturn(ok);
@@ -88,7 +89,7 @@ class OutboxRelayTest {
     @DisplayName("on a broker failure, leaves the event unpublished and records the attempt")
     void recordsFailure() throws Exception {
         OutboxEvent event = pendingEvent();
-        when(outboxRepository.findTop100ByPublishedAtIsNullOrderByCreatedAtAsc()).thenReturn(List.of(event));
+        when(outboxRepository.lockUnpublishedBatch(anyInt())).thenReturn(List.of(event));
         CompletableFuture<SendResult<String, Object>> failed = new CompletableFuture<>();
         failed.completeExceptionally(new RuntimeException("broker down"));
         when(kafkaTemplate.send(anyString(), anyString(), any(PatientRegistered.class))).thenReturn(failed);
