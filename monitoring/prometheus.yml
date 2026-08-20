@@ -1,0 +1,26 @@
+# Prometheus scrape config. Each service exposes Micrometer metrics at /actuator/prometheus
+# (public actuator path); Prometheus polls them over the compose network by hostname.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: patient-service
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ['patient-service:4000']
+
+  - job_name: billing-service
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ['billing-service:4001']
+
+  - job_name: auth-service
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ['auth-service:4002']
+
+  - job_name: api-gateway
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ['api-gateway:4004']

@@ -58,6 +58,12 @@
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-actuator</artifactId>
 		</dependency>
+		<!-- Prometheus metrics: exposes /actuator/prometheus (JVM, HTTP, Hikari, etc.). -->
+		<dependency>
+			<groupId>io.micrometer</groupId>
+			<artifactId>micrometer-registry-prometheus</artifactId>
+			<scope>runtime</scope>
+		</dependency>
 
 		<!-- Kafka: billing-service is an event CONSUMER (opens accounts from PatientRegistered).
 		     Version managed by Boot's BOM. -->

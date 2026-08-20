@@ -42,6 +42,12 @@
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-actuator</artifactId>
 		</dependency>
+		<!-- Prometheus metrics: exposes /actuator/prometheus (JVM, HTTP, Hikari, etc.). -->
+		<dependency>
+			<groupId>io.micrometer</groupId>
+			<artifactId>micrometer-registry-prometheus</artifactId>
+			<scope>runtime</scope>
+		</dependency>
 
 		<!-- Edge JWT validation. With WebFlux on the classpath this auto-configures the *reactive*
 		     resource server (ReactiveJwtDecoder from the jwk-set-uri) — same starter as the servlet
