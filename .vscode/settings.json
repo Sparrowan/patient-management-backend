@@ -1,4 +1,9 @@
 {
   "xml.validation.schema.enabled": "never",
-  "java.autobuild.enabled": false
+  "java.autobuild.enabled": false,
+  // The Spring Tools static SQL parser can't model dialect-specific native queries
+  // (e.g. MariaDB `FOR UPDATE SKIP LOCKED`, or a JPA `:limit` placeholder inside LIMIT),
+  // so it false-flags valid, tested @Query(nativeQuery=true) SQL. Ignore native-SQL syntax
+  // checks; JPQL/HQL validation stays on (it catches real typos in derived/JPQL queries).
+  "spring-boot.ls.problem.data-query.SQL_SYNTAX": "IGNORE"
 }

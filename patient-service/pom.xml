@@ -58,6 +58,12 @@
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-actuator</artifactId>
 		</dependency>
+		<!-- Prometheus metrics: exposes /actuator/prometheus (JVM, HTTP, Hikari, etc.). -->
+		<dependency>
+			<groupId>io.micrometer</groupId>
+			<artifactId>micrometer-registry-prometheus</artifactId>
+			<scope>runtime</scope>
+		</dependency>
 
 		<!-- Kafka: patient-service is an event PRODUCER (publishes PatientRegistered via the outbox
 		     relay). Version managed by Boot's BOM. -->
