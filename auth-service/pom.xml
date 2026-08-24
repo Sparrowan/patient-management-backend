@@ -47,6 +47,17 @@
 			<artifactId>micrometer-registry-prometheus</artifactId>
 			<scope>runtime</scope>
 		</dependency>
+		<!-- Distributed tracing: Micrometer Tracing bridged to OpenTelemetry, exporting spans via
+		     OTLP. HTTP requests (login/register) are auto-instrumented and continue any inbound W3C
+		     traceparent forwarded by the gateway. -->
+		<dependency>
+			<groupId>io.micrometer</groupId>
+			<artifactId>micrometer-tracing-bridge-otel</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>io.opentelemetry</groupId>
+			<artifactId>opentelemetry-exporter-otlp</artifactId>
+		</dependency>
 
 		<!-- Persistence: users live in MariaDB (Flyway-owned schema), same as the other services. -->
 		<dependency>

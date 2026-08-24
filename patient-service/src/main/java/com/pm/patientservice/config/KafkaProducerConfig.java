@@ -40,6 +40,12 @@ public class KafkaProducerConfig {
         props.put(AbstractKafkaSchemaSerDeConfig.VALUE_SUBJECT_NAME_STRATEGY, TopicRecordNameStrategy.class.getName());
         // acks=all: the broker only acks once the record is fully replicated — no silent loss.
         props.put(ProducerConfig.ACKS_CONFIG, "all");
-        return new KafkaTemplate<>(new DefaultKafkaProducerFactory<>(props));
+        KafkaTemplate<String, Object> template = new KafkaTemplate<>(new DefaultKafkaProducerFactory<>(props));
+        // Create a producer span per send and inject the W3C traceparent into the record headers, so
+        // the consumer can continue the trace. The auto-config property (spring.kafka.template.
+        // observation-enabled) only touches Boot's template; this bean is hand-built, so we set it
+        // here. The ObservationRegistry is picked up from the context (this is a Spring-managed bean).
+        template.setObservationEnabled(true);
+        return template;
     }
 }

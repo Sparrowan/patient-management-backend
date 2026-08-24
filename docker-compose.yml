@@ -135,6 +135,8 @@ services:
       BILLING_GRPC_ADDRESS: static://billing-service:9001
       # Fetch auth-service's public keys (JWKS) to verify JWTs in-network.
       AUTH_JWKS_URI: http://auth-service:4002/oauth2/jwks
+      # Export trace spans (OTLP/HTTP) to the Jaeger container.
+      OTLP_TRACING_ENDPOINT: http://jaeger:4318/v1/traces
     ports:
       - "4000:4000"
     networks:
@@ -183,6 +185,8 @@ services:
       SCHEMA_REGISTRY_URL: http://schema-registry:8081
       # Verify JWTs on REST calls against auth-service's JWKS (in-network).
       AUTH_JWKS_URI: http://auth-service:4002/oauth2/jwks
+      # Export trace spans (OTLP/HTTP) to the Jaeger container.
+      OTLP_TRACING_ENDPOINT: http://jaeger:4318/v1/traces
     ports:
       - "4001:4001"
       - "9001:9001"   # gRPC (synchronous API; published for host debugging)
@@ -221,6 +225,8 @@ services:
       DB_URL: jdbc:mariadb://auth-service-db:3306/auth_db
       DB_USERNAME: auth
       DB_PASSWORD: auth
+      # Export trace spans (OTLP/HTTP) to the Jaeger container.
+      OTLP_TRACING_ENDPOINT: http://jaeger:4318/v1/traces
     ports:
       - "4002:4002"
     networks:
@@ -263,8 +269,24 @@ services:
       # Rate limiter's Redis + the browser origin(s) allowed through CORS.
       REDIS_HOST: redis
       GATEWAY_CORS_ALLOWED_ORIGINS: http://localhost:3000
+      # Export trace spans (OTLP/HTTP) to the Jaeger container.
+      OTLP_TRACING_ENDPOINT: http://jaeger:4318/v1/traces
     ports:
       - "4004:4004"
+    networks:
+      - patient-net
+
+  # --- jaeger (receives OTLP trace spans from every service; UI at http://localhost:16686) ----
+  jaeger:
+    image: jaegertracing/all-in-one:1.60
+    container_name: jaeger
+    environment:
+      # v1 all-in-one needs OTLP explicitly enabled (it's on by default only in Jaeger v2).
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686"   # Jaeger UI
+      - "4318:4318"     # OTLP/HTTP receiver (services POST spans here)
+      - "4317:4317"     # OTLP/gRPC receiver
     networks:
       - patient-net
 
