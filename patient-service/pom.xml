@@ -64,6 +64,17 @@
 			<artifactId>micrometer-registry-prometheus</artifactId>
 			<scope>runtime</scope>
 		</dependency>
+		<!-- Distributed tracing: Micrometer Tracing bridged to OpenTelemetry, exporting spans via
+		     OTLP. HTTP is auto-instrumented; the outbound gRPC call (net.devh auto-tracing) and the
+		     Kafka producer propagate the W3C traceparent once these are on the classpath. -->
+		<dependency>
+			<groupId>io.micrometer</groupId>
+			<artifactId>micrometer-tracing-bridge-otel</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>io.opentelemetry</groupId>
+			<artifactId>opentelemetry-exporter-otlp</artifactId>
+		</dependency>
 
 		<!-- Kafka: patient-service is an event PRODUCER (publishes PatientRegistered via the outbox
 		     relay). Version managed by Boot's BOM. -->

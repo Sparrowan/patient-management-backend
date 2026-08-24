@@ -30,9 +30,19 @@ cross-reference the backend-patterns catalog we're prioritizing for banking/fint
 
 ## Tier 2 — observability & ops (before traffic grows)
 
-- [ ] **Metrics** — `micrometer-registry-prometheus` → `/actuator/prometheus`.
-- [ ] **Distributed tracing** — Micrometer Tracing + OpenTelemetry (OTLP) → Tempo; replaces the
-      hand-rolled `requestId` with propagated trace/span ids. `[#61]`
+- [x] **Metrics** — `micrometer-registry-prometheus` → `/actuator/prometheus` on all four services,
+      tagged `application=<service>`; a Prometheus container scrapes them. RED + JVM + HikariCP. `[#12]`
+- [x] **Distributed tracing** — Micrometer Tracing + OpenTelemetry (OTLP) → **Jaeger** (single-container
+      all-in-one; Tempo needs a separate Grafana UI, so Jaeger wins for local). Propagates the W3C
+      `traceparent` across **HTTP** (auto), **gRPC** (net.devh 3.1.0 auto-instrumentation — the delete
+      veto shows as one 3-service trace), and **Kafka** (producer `setObservationEnabled(true)` +
+      `spring.kafka.listener.observation-enabled`). Verified end-to-end in Jaeger.
+  - [ ] **Outbox trace-continuity** (the known seam) — the Kafka publish happens on the `@Scheduled`
+        relay thread, so its trace is rooted at the relay tick, **not** the originating HTTP request.
+        Fix: persist the `traceparent` on the `outbox_events` row at write time and restore it in the
+        relay before the send, so the publish→consume trace links back to the request that caused it.
+  - [ ] **Log ↔ trace correlation** — include the propagated `traceId`/`spanId` in the structured JSON
+        logs (alongside the existing `requestId`) so a log line jumps to its trace.
 - [x] **Structured JSON logging** + correlation IDs — native Boot structured logging (ECS) in prod;
       `CorrelationIdFilter` → `X-Request-Id` in MDC. `[#59/#61]`
 - [x] **Health probes** (liveness/readiness) + **graceful shutdown**. `[#65/#66]`

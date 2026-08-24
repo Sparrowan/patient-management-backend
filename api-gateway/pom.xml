@@ -48,6 +48,17 @@
 			<artifactId>micrometer-registry-prometheus</artifactId>
 			<scope>runtime</scope>
 		</dependency>
+		<!-- Distributed tracing: Micrometer Tracing bridged to OpenTelemetry, exporting spans via
+		     OTLP. The reactive gateway starts the root server span per request and propagates the
+		     W3C traceparent to every downstream service (see spring.reactor.context-propagation). -->
+		<dependency>
+			<groupId>io.micrometer</groupId>
+			<artifactId>micrometer-tracing-bridge-otel</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>io.opentelemetry</groupId>
+			<artifactId>opentelemetry-exporter-otlp</artifactId>
+		</dependency>
 
 		<!-- Edge JWT validation. With WebFlux on the classpath this auto-configures the *reactive*
 		     resource server (ReactiveJwtDecoder from the jwk-set-uri) — same starter as the servlet

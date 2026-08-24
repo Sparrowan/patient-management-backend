@@ -157,9 +157,15 @@ com.pm.<service>/
   exceptions (`*NotFoundException` → 404, `*AlreadyExistsException` → 409, validation → 400) to
   RFC 7807 `ProblemDetail`, with a logged catch-all → 500 that leaks no internals. Services throw
   domain exceptions; they never return null/empty for "not found".
-- **Observability**: `CorrelationIdFilter` puts an `X-Request-Id` in the MDC per request (echoed
-  in the response header). Logs are native structured JSON (ECS) in the `docker`/prod profile,
-  plain console + `requestId` locally. Graceful shutdown + Actuator health probes are on.
+- **Observability (three pillars + health)**: **health** = Actuator liveness/readiness probes +
+  graceful shutdown. **Logs** = `CorrelationIdFilter` puts an `X-Request-Id` in the MDC per request
+  (echoed in the response header); native structured JSON (ECS) in the `docker`/prod profile, plain
+  console + `requestId` locally. **Metrics** = Micrometer → `/actuator/prometheus` (RED + JVM +
+  HikariCP), tagged `application=<service>`, scraped by a Prometheus container. **Traces** = Micrometer
+  Tracing → OTLP → Jaeger; the W3C `traceparent` propagates across **HTTP** (auto), **gRPC** (net.devh
+  auto-instrumentation) and **Kafka** (producer/consumer observation). Known seam: the outbox relay
+  publishes on a scheduled thread, so the Kafka trace roots at the relay tick, not the originating
+  request — trace-continuity via a stored `traceparent` is a planned follow-up (see ROADMAP).
 - **Request DTOs are validated**: `record` request DTOs carry Bean Validation
   (`@NotBlank`, `@Email`, ...); controllers annotate the body with `@Valid`.
 - **List endpoints are paginated**: accept `Pageable`; never return an unbounded `findAll()`
@@ -349,6 +355,15 @@ compilation problems` / `No qualifying bean of type PatientMapper` at startup). 
       READ COMMITTED locks the latest committed row). `TransferStatus` is a seam: a same-DB transfer is
       always `COMPLETED`; a future slow/external transfer becomes `PENDING` + async worker, then an
       orchestrated saga (`FAILED`/`REVERSED` compensation) — see ROADMAP.
+- [x] **Observability Tier 2 — metrics + tracing.** **Prometheus metrics** on all four services
+      (`/actuator/prometheus`, RED + JVM + HikariCP, tagged `application=<service>`, scraped by a
+      Prometheus container). **Distributed tracing** (Micrometer Tracing → OTLP → **Jaeger**): the W3C
+      `traceparent` propagates across **HTTP** (auto), **gRPC** (net.devh 3.1.0 auto-instrumentation —
+      the delete veto shows as one 3-service trace) and **Kafka** (producer `setObservationEnabled` +
+      `spring.kafka.listener.observation-enabled`). Verified end-to-end in Jaeger. Known seam: the
+      outbox relay publishes on a `@Scheduled` thread, so the Kafka trace roots at the relay tick, not
+      the originating request — outbox trace-continuity (store+restore `traceparent`) is the next bit.
+      Docker builds also cache the Maven repo via a BuildKit mount (only changed deps re-download).
 - [ ] Next: orchestrated saga (the async/cross-boundary transfer evolution), CDC (Debezium),
       reconciliation. Background writes with no originating user (schedulers) still audit `"system"`.
 
