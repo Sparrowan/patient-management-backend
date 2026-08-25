@@ -41,8 +41,9 @@ cross-reference the backend-patterns catalog we're prioritizing for banking/fint
         relay thread, so its trace is rooted at the relay tick, **not** the originating HTTP request.
         Fix: persist the `traceparent` on the `outbox_events` row at write time and restore it in the
         relay before the send, so the publish→consume trace links back to the request that caused it.
-  - [ ] **Log ↔ trace correlation** — include the propagated `traceId`/`spanId` in the structured JSON
-        logs (alongside the existing `requestId`) so a log line jumps to its trace.
+  - [x] **Log ↔ trace correlation** — Micrometer puts `traceId`/`spanId` in the MDC; the ECS JSON logs
+        emit them as the ECS-standard `trace.id`/`span.id` (via `logging.structured.json.rename`),
+        alongside the existing `requestId`, so a log line pivots straight to its Jaeger trace.
 - [x] **Structured JSON logging** + correlation IDs — native Boot structured logging (ECS) in prod;
       `CorrelationIdFilter` → `X-Request-Id` in MDC. `[#59/#61]`
 - [x] **Health probes** (liveness/readiness) + **graceful shutdown**. `[#65/#66]`
