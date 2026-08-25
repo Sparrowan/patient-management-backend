@@ -75,7 +75,7 @@ class OutboxSkipLockedIntegrationTest {
         newTransaction().executeWithoutResult(status -> {
             outboxRepository.deleteAllInBatch();
             for (int i = 0; i < 4; i++) {
-                outboxRepository.save(OutboxEvent.forPatientRegistered(UUID.randomUUID(), "{}"));
+                outboxRepository.save(OutboxEvent.forPatientRegistered(UUID.randomUUID(), "{}", null));
             }
         });
     }
