@@ -61,6 +61,10 @@ class PatientServiceImplTest {
     @Mock private org.springframework.data.domain.AuditorAware<String> auditorAware;
     // Real ObjectMapper (spy) so the outbox payload is actually serialized, as in production.
     @Spy private ObjectMapper objectMapper = new ObjectMapper();
+    // Tracing collaborators: the mock Tracer returns a null current trace context, so the captured
+    // traceparent is null here (no active trace in a unit test) — exactly the untraced fallback.
+    @Mock private io.micrometer.tracing.Tracer tracer;
+    @Mock private io.micrometer.tracing.propagation.Propagator propagator;
     @InjectMocks private PatientServiceImpl patientService;
 
     private Patient existingPatient() {

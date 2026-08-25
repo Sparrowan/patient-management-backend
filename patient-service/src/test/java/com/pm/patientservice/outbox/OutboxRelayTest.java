@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -13,6 +14,9 @@ import com.pm.events.PatientDeleted;
 import com.pm.events.PatientRegistered;
 import com.pm.patientservice.model.OutboxEvent;
 import com.pm.patientservice.repository.OutboxEventRepository;
+import io.micrometer.tracing.Span;
+import io.micrometer.tracing.Tracer;
+import io.micrometer.tracing.propagation.Propagator;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -40,18 +44,22 @@ class OutboxRelayTest {
     @Mock private OutboxEventRepository outboxRepository;
     @Mock private KafkaTemplate<String, Object> kafkaTemplate;
     @Spy private ObjectMapper objectMapper = new ObjectMapper();
+    // Tracing collaborators: only exercised when a row carries a traceparent (see the restore test);
+    // the other tests use untraced rows, so these mocks stay unused there.
+    @Mock private Tracer tracer;
+    @Mock private Propagator propagator;
     @InjectMocks private OutboxRelay relay;
 
     private OutboxEvent pendingEvent() throws Exception {
         String payload = objectMapper.writeValueAsString(new PatientRegisteredPayload(
                 UUID.randomUUID().toString(), PATIENT_ID.toString(), "USD", 1_700_000_000_000L, "test-actor"));
-        return OutboxEvent.forPatientRegistered(PATIENT_ID, payload);
+        return OutboxEvent.forPatientRegistered(PATIENT_ID, payload, null);
     }
 
     private OutboxEvent pendingDeletedEvent() throws Exception {
         String payload = objectMapper.writeValueAsString(new PatientDeletedPayload(
                 UUID.randomUUID().toString(), PATIENT_ID.toString(), 1_700_000_000_000L));
-        return OutboxEvent.forPatientDeleted(PATIENT_ID, payload);
+        return OutboxEvent.forPatientDeleted(PATIENT_ID, payload, null);
     }
 
     @Test
@@ -83,6 +91,30 @@ class OutboxRelayTest {
 
         assertThat(event.isPublished()).isTrue();
         verify(kafkaTemplate).send(eq("patient-events"), eq(PATIENT_ID.toString()), any(PatientDeleted.class));
+    }
+
+    @Test
+    @DisplayName("a row carrying a traceparent publishes inside the restored trace, then ends the span")
+    void restoresStoredTraceContext() throws Exception {
+        String payload = objectMapper.writeValueAsString(new PatientRegisteredPayload(
+                UUID.randomUUID().toString(), PATIENT_ID.toString(), "USD", 1_700_000_000_000L, "actor"));
+        OutboxEvent event = OutboxEvent.forPatientRegistered(PATIENT_ID, payload, "00-trace-span-01");
+        when(outboxRepository.lockUnpublishedBatch(anyInt())).thenReturn(List.of(event));
+        when(kafkaTemplate.send(anyString(), anyString(), any(PatientRegistered.class)))
+                .thenReturn(CompletableFuture.completedFuture(null));
+        // Restore chain: propagator.extract(...).name(...).start() -> span; tracer.withSpan(span) -> scope.
+        Span.Builder builder = mock(Span.Builder.class);
+        Span span = mock(Span.class);
+        when(propagator.extract(any(), any())).thenReturn(builder);
+        when(builder.name(anyString())).thenReturn(builder);
+        when(builder.start()).thenReturn(span);
+        when(tracer.withSpan(span)).thenReturn(mock(Tracer.SpanInScope.class));
+
+        relay.publishPending();
+
+        assertThat(event.isPublished()).isTrue();
+        verify(propagator).extract(any(), any()); // the stored context was restored
+        verify(span).end();                       // and its span was closed after the send
     }
 
     @Test
