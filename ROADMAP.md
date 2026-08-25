@@ -37,12 +37,13 @@ cross-reference the backend-patterns catalog we're prioritizing for banking/fint
       `traceparent` across **HTTP** (auto), **gRPC** (net.devh 3.1.0 auto-instrumentation — the delete
       veto shows as one 3-service trace), and **Kafka** (producer `setObservationEnabled(true)` +
       `spring.kafka.listener.observation-enabled`). Verified end-to-end in Jaeger.
-- [x] **Outbox trace-continuity** (the seam above, now closed) — the `traceparent` is persisted on the
-        `outbox_events` row at write time (V7) and restored in the relay before the send, so the
-        publish→consume trace links back to the originating HTTP request. Verified in Jaeger: registering
-        a patient is one trace across gateway → patient → (outbox-publish) → Kafka → billing.
-  - [ ] **Log ↔ trace correlation** — include the propagated `traceId`/`spanId` in the structured JSON
-        logs (alongside the existing `requestId`) so a log line jumps to its trace.
+  - [x] **Outbox trace-continuity** (the seam above, now closed) — the `traceparent` is persisted on
+        the `outbox_events` row at write time (V7) and restored in the relay before the send, so the
+        publish→consume trace links back to the originating HTTP request. Verified in Jaeger:
+        registering a patient is one trace across gateway → patient → (outbox-publish) → Kafka → billing.
+  - [x] **Log ↔ trace correlation** — Micrometer puts `traceId`/`spanId` in the MDC; the ECS JSON logs
+        emit them as the ECS-standard `trace.id`/`span.id` (via `logging.structured.json.rename`),
+        alongside the existing `requestId`, so a log line pivots straight to its Jaeger trace.
 - [x] **Structured JSON logging** + correlation IDs — native Boot structured logging (ECS) in prod;
       `CorrelationIdFilter` → `X-Request-Id` in MDC. `[#59/#61]`
 - [x] **Health probes** (liveness/readiness) + **graceful shutdown**. `[#65/#66]`

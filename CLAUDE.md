@@ -160,7 +160,9 @@ com.pm.<service>/
 - **Observability (three pillars + health)**: **health** = Actuator liveness/readiness probes +
   graceful shutdown. **Logs** = `CorrelationIdFilter` puts an `X-Request-Id` in the MDC per request
   (echoed in the response header); native structured JSON (ECS) in the `docker`/prod profile, plain
-  console + `requestId` locally. **Metrics** = Micrometer → `/actuator/prometheus` (RED + JVM +
+  console + `requestId` locally. The active `traceId`/`spanId` ride in the MDC too, emitted as
+  ECS-standard `trace.id`/`span.id` in the JSON logs, so a log line pivots straight to its Jaeger
+  trace. **Metrics** = Micrometer → `/actuator/prometheus` (RED + JVM +
   HikariCP), tagged `application=<service>`, scraped by a Prometheus container. **Traces** = Micrometer
   Tracing → OTLP → Jaeger; the W3C `traceparent` propagates across **HTTP** (auto), **gRPC** (net.devh
   auto-instrumentation) and **Kafka** (producer/consumer observation). Known seam: the outbox relay
