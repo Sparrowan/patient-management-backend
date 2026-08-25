@@ -56,6 +56,14 @@ public class OutboxEvent {
     @Column(nullable = false, length = 2048)
     private String payload;
 
+    /**
+     * W3C traceparent of the request that wrote this row (e.g. {@code 00-<trace>-<span>-<flags>}),
+     * captured so the relay can continue that trace when it publishes later on its own scheduled
+     * thread. Null = no active trace at write time; the relay then publishes untraced.
+     */
+    @Column(length = 64)
+    private String traceParent;
+
     @Column(nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -70,26 +78,32 @@ public class OutboxEvent {
     protected OutboxEvent() {
     }
 
-    private OutboxEvent(String aggregateType, UUID aggregateId, String eventType, String topic, String payload) {
+    private OutboxEvent(String aggregateType, UUID aggregateId, String eventType, String topic,
+            String payload, String traceParent) {
         this.aggregateType = aggregateType;
         this.aggregateId = aggregateId;
         this.eventType = eventType;
         this.topic = topic;
         this.payload = payload;
+        this.traceParent = traceParent;
         this.createdAt = Instant.now();
         this.attempts = 0;
     }
 
-    /** Records the intent to publish a {@code PatientRegistered} event for the given patient. */
-    public static OutboxEvent forPatientRegistered(UUID patientId, String payloadJson) {
+    /**
+     * Records the intent to publish a {@code PatientRegistered} event for the given patient.
+     * {@code traceParent} is the caller's W3C trace context (may be null) so the eventual publish
+     * continues the originating trace.
+     */
+    public static OutboxEvent forPatientRegistered(UUID patientId, String payloadJson, String traceParent) {
         return new OutboxEvent(
-                PATIENT_AGGREGATE, patientId, PATIENT_REGISTERED, PATIENT_EVENTS_TOPIC, payloadJson);
+                PATIENT_AGGREGATE, patientId, PATIENT_REGISTERED, PATIENT_EVENTS_TOPIC, payloadJson, traceParent);
     }
 
     /** Records the intent to publish a {@code PatientDeleted} event for the given patient. */
-    public static OutboxEvent forPatientDeleted(UUID patientId, String payloadJson) {
+    public static OutboxEvent forPatientDeleted(UUID patientId, String payloadJson, String traceParent) {
         return new OutboxEvent(
-                PATIENT_AGGREGATE, patientId, PATIENT_DELETED, PATIENT_EVENTS_TOPIC, payloadJson);
+                PATIENT_AGGREGATE, patientId, PATIENT_DELETED, PATIENT_EVENTS_TOPIC, payloadJson, traceParent);
     }
 
     /** Marks the event as delivered to the broker (relay stamps this on a successful send). */

@@ -17,6 +17,11 @@ import com.pm.events.PatientRegistered;
 import com.pm.patientservice.model.OutboxEvent;
 import com.pm.patientservice.repository.OutboxEventRepository;
 
+import io.micrometer.tracing.Span;
+import io.micrometer.tracing.Tracer;
+import io.micrometer.tracing.propagation.Propagator;
+import java.util.Map;
+
 import lombok.RequiredArgsConstructor;
 
 /**
@@ -55,6 +60,8 @@ public class OutboxRelay {
     // are other KafkaTemplate<String,Object> beans for the consumer DLQ).
     private final KafkaTemplate<String, Object> patientEventsKafkaTemplate;
     private final ObjectMapper objectMapper;
+    private final Tracer tracer;
+    private final Propagator propagator;
 
     @Scheduled(fixedDelayString = "${outbox.relay.poll-interval-ms:1000}")
     @Transactional
@@ -62,13 +69,36 @@ public class OutboxRelay {
         List<OutboxEvent> batch = outboxRepository.lockUnpublishedBatch(BATCH_SIZE);
         for (OutboxEvent event : batch) {
             try {
-                publish(event);
+                publishInOriginatingTrace(event);
                 event.markPublished();
             } catch (Exception e) {
                 event.recordFailedAttempt();
                 log.warn("Outbox publish failed for event {} (attempt {}): {}",
                         event.getId(), event.getAttempts(), e.toString());
             }
+        }
+    }
+
+    /**
+     * Publishes within the trace that originally wrote the row. The stored W3C traceparent is
+     * restored as the current span, so the KafkaTemplate producer span (and the downstream consumer)
+     * join the originating request's trace instead of this relay's scheduled-task trace — the outbox
+     * decouples the two threads, and this re-links them. No stored context (rows written before the
+     * feature, or outside any trace) → publish as-is under the relay's own context.
+     */
+    private void publishInOriginatingTrace(OutboxEvent event) throws Exception {
+        String traceParent = event.getTraceParent();
+        if (traceParent == null || traceParent.isBlank()) {
+            publish(event);
+            return;
+        }
+        Span span = propagator.extract(Map.of("traceparent", traceParent), (carrier, key) -> carrier.get(key))
+                .name("outbox-publish")
+                .start();
+        try (Tracer.SpanInScope scope = tracer.withSpan(span)) {
+            publish(event);
+        } finally {
+            span.end();
         }
     }
 

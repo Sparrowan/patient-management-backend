@@ -16,7 +16,12 @@ import com.pm.patientservice.repository.OutboxEventRepository;
 import com.pm.patientservice.repository.PatientRepository;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.tracing.TraceContext;
+import io.micrometer.tracing.Tracer;
+import io.micrometer.tracing.propagation.Propagator;
 import java.time.Instant;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.UUID;
 import org.springframework.data.domain.AuditorAware;
 
@@ -39,6 +44,8 @@ public class PatientServiceImpl implements PatientService {
     private final ObjectMapper objectMapper;
     private final BillingGrpcClient billingGrpcClient;
     private final AuditorAware<String> auditorAware;
+    private final Tracer tracer;
+    private final Propagator propagator;
 
     @Override
     @Transactional(readOnly = true)
@@ -64,8 +71,8 @@ public class PatientServiceImpl implements PatientService {
         // Transactional outbox: record the "open a billing account" intent in the SAME transaction
         // as the patient insert. The OutboxRelay ships it to Kafka after commit — guaranteed
         // delivery, unlike the old best-effort gRPC call it replaces.
-        outboxRepository.save(
-                OutboxEvent.forPatientRegistered(saved.getId(), registeredPayload(saved.getId())));
+        outboxRepository.save(OutboxEvent.forPatientRegistered(
+                saved.getId(), registeredPayload(saved.getId()), currentTraceParent()));
         return patientMapper.toResponse(saved);
     }
 
@@ -133,7 +140,27 @@ public class PatientServiceImpl implements PatientService {
         patientRepository.save(patient);
         // Fan-out only: announce the deletion for other consumers (analytics/audit/future). Billing
         // already closed the account synchronously above, so for billing this event is a no-op.
-        outboxRepository.save(OutboxEvent.forPatientDeleted(id, deletedPayload(id)));
+        outboxRepository.save(OutboxEvent.forPatientDeleted(id, deletedPayload(id), currentTraceParent()));
+    }
+
+    /**
+     * The W3C traceparent of the current request, stored on the outbox row so the relay's later
+     * publish (on its own scheduled thread) continues this trace instead of starting a fresh one.
+     * Returns null when there is no active trace (e.g. tracing disabled) — the relay then publishes
+     * untraced.
+     */
+    private String currentTraceParent() {
+        var currentTraceContext = tracer.currentTraceContext();
+        if (currentTraceContext == null) {
+            return null;
+        }
+        TraceContext context = currentTraceContext.context();
+        if (context == null) {
+            return null;
+        }
+        Map<String, String> carrier = new HashMap<>();
+        propagator.inject(context, carrier, (c, key, value) -> c.put(key, value));
+        return carrier.get("traceparent");
     }
 
     private Patient findByIdOrThrow(UUID id) {
