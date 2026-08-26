@@ -44,8 +44,9 @@ cross-reference the backend-patterns catalog we're prioritizing for banking/fint
   - [x] **Log ↔ trace correlation** — Micrometer puts `traceId`/`spanId` in the MDC; the ECS JSON logs
         emit them as the ECS-standard `trace.id`/`span.id` (via `logging.structured.json.rename`),
         alongside the existing `requestId`, so a log line pivots straight to its Jaeger trace.
-- [x] **Structured JSON logging** + correlation IDs — native Boot structured logging (ECS) in prod;
-      `CorrelationIdFilter` → `X-Request-Id` in MDC. `[#59/#61]`
+- [x] **Structured JSON logging** + correlation IDs — native Boot structured logging (ECS) in prod on
+      **all four services** (`docker` profile); `CorrelationIdFilter` → `X-Request-Id` in MDC on the
+      servlet services, plus ECS `trace.id`/`span.id` everywhere for trace correlation. `[#59/#61]`
 - [x] **Health probes** (liveness/readiness) + **graceful shutdown**. `[#65/#66]`
 - [ ] **Log aggregation** — ship JSON logs to Loki/ELK, centrally indexed. `[#60]`
 
