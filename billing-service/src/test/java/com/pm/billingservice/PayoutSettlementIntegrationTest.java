@@ -24,8 +24,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
  * Drives the saga worker against a real MariaDB (the periodic trigger is disabled in tests — see
  * {@link AbstractIntegrationTest} — so the worker is invoked directly and deterministically). Proves
  * the native SKIP-LOCKED claim query works and that each settlement outcome moves the payout to the
- * right terminal/retry state. The money debited at initiate is unchanged by settlement in this bit;
- * returning it on failure (compensation → REVERSED) is the next bit.
+ * right terminal/retry state, including compensation: a declined payout is REVERSED and the debit is
+ * credited back to the source account (a transient error instead stays PENDING for retry).
  */
 @DisplayName("Payout settlement worker (integration)")
 class PayoutSettlementIntegrationTest extends AbstractIntegrationTest {
@@ -88,15 +88,17 @@ class PayoutSettlementIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
-    @DisplayName("parks a declined payout as FAILED")
-    void parksDeclinedAsFailed() {
+    @DisplayName("compensates a declined payout to REVERSED, crediting the debit back")
+    void reversesDeclinedPayout() {
         UUID account = openAccount();
         credit(account, "100.00", "seed");
         UUID payout = initiatePayout(account, "FAIL-DE89370400440532013000", "p1");
+        assertThat(balanceOf(account)).isEqualByComparingTo("70.00"); // debited at initiate
 
         worker.drivePendingPayouts();
 
-        assertThat(statusOf(payout)).isEqualTo("FAILED");
+        assertThat(statusOf(payout)).isEqualTo("REVERSED");
+        assertThat(balanceOf(account)).isEqualByComparingTo("100.00"); // debit credited back
     }
 
     @Test

@@ -5,11 +5,15 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.when;
 
+import com.pm.billingservice.model.BillingAccount;
 import com.pm.billingservice.model.Payout;
 import com.pm.billingservice.model.PayoutStatus;
+import com.pm.billingservice.repository.BillingAccountRepository;
+import com.pm.billingservice.repository.LedgerEntryRepository;
 import com.pm.billingservice.repository.PayoutRepository;
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -24,9 +28,11 @@ class PayoutSagaWorkerTest {
 
     @Mock private PayoutRepository payoutRepository;
     @Mock private ExternalSettlementGateway gateway;
+    @Mock private BillingAccountRepository accountRepository;
+    @Mock private LedgerEntryRepository ledgerRepository;
 
     private PayoutSagaWorker worker() {
-        return new PayoutSagaWorker(payoutRepository, gateway);
+        return new PayoutSagaWorker(payoutRepository, gateway, accountRepository, ledgerRepository);
     }
 
     private Payout pending() {
@@ -71,15 +77,18 @@ class PayoutSagaWorkerTest {
     }
 
     @Test
-    @DisplayName("a permanent decline is parked as FAILED")
-    void declinedFails() {
+    @DisplayName("a permanent decline is compensated to REVERSED, crediting the debit back")
+    void declinedReverses() {
         Payout payout = pending();
         claim(payout);
         settlementReturns(SettlementOutcome.DECLINED);
+        BillingAccount source = BillingAccount.openFor(UUID.randomUUID(), "USD");
+        when(accountRepository.findByIdForUpdate(payout.getSourceAccountId())).thenReturn(Optional.of(source));
 
         worker().drivePendingPayouts();
 
-        assertThat(payout.getStatus()).isEqualTo(PayoutStatus.FAILED);
+        assertThat(payout.getStatus()).isEqualTo(PayoutStatus.REVERSED);
+        assertThat(source.getBalance()).isEqualByComparingTo("30.00"); // debit credited back
     }
 
     @Test

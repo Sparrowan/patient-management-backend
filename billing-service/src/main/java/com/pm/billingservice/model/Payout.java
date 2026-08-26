@@ -121,9 +121,21 @@ public class Payout extends BaseEntity {
     }
 
     /**
-     * Parks the payout as terminally {@link PayoutStatus#FAILED} — settlement did not go through and
-     * the money debited at initiate has not been returned, so it needs operator attention. (The next
-     * bit replaces most FAILED paths with automatic compensation to {@link PayoutStatus#REVERSED}.)
+     * Compensation succeeded: settlement did not go through, so the debit was credited back to the
+     * source account and the payout is terminally {@link PayoutStatus#REVERSED}. Reached only from a
+     * <em>definitive</em> non-settlement (the rail declined) — where we know no money left — so
+     * crediting back cannot double-refund.
+     */
+    public void markReversed(String reason) {
+        this.status = PayoutStatus.REVERSED;
+        this.failureReason = reason;
+    }
+
+    /**
+     * Parks the payout as terminally {@link PayoutStatus#FAILED} — the outcome is <em>ambiguous</em>
+     * (retries exhausted on transient errors; a lost ack may mean the money actually left), so the
+     * debit is deliberately <b>not</b> auto-reversed: blindly crediting back could double-pay. It
+     * waits for reconciliation (query the rail's real status, then complete or reverse by hand).
      */
     public void markFailed(String reason) {
         this.status = PayoutStatus.FAILED;
