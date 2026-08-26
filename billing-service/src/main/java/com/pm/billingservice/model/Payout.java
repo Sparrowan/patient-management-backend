@@ -9,6 +9,7 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.UUID;
 import lombok.Getter;
 
@@ -56,6 +57,18 @@ public class Payout extends BaseEntity {
     @Column(length = 255)
     private String description;
 
+    /** Settlement attempts made by the saga worker so far. */
+    @Column(nullable = false)
+    private int attempts;
+
+    /** Earliest time the worker should (re)attempt settlement — moved forward on each retry (backoff). */
+    @Column(nullable = false)
+    private Instant nextAttemptAt;
+
+    /** Why the last settlement attempt failed; null while healthy. Diagnostic only. */
+    @Column(length = 255)
+    private String failureReason;
+
     protected Payout() {
     }
 
@@ -73,6 +86,8 @@ public class Payout extends BaseEntity {
         this.idempotencyKey = idempotencyKey;
         this.description = description;
         this.status = PayoutStatus.PENDING;
+        this.attempts = 0;
+        this.nextAttemptAt = Instant.now(); // due for settlement immediately
     }
 
     /**
@@ -88,5 +103,30 @@ public class Payout extends BaseEntity {
             String idempotencyKey,
             String description) {
         return new Payout(sourceAccountId, destinationReference, amount, currency, idempotencyKey, description);
+    }
+
+    /** The external rail confirmed settlement — terminal success. */
+    public void markCompleted() {
+        this.status = PayoutStatus.COMPLETED;
+    }
+
+    /**
+     * A settlement attempt failed transiently; schedule the next retry. Bumps {@link #attempts} and
+     * pushes {@link #nextAttemptAt} out so the worker backs off instead of hot-looping.
+     */
+    public void recordFailedAttempt(String reason, Instant nextAttemptAt) {
+        this.attempts++;
+        this.failureReason = reason;
+        this.nextAttemptAt = nextAttemptAt;
+    }
+
+    /**
+     * Parks the payout as terminally {@link PayoutStatus#FAILED} — settlement did not go through and
+     * the money debited at initiate has not been returned, so it needs operator attention. (The next
+     * bit replaces most FAILED paths with automatic compensation to {@link PayoutStatus#REVERSED}.)
+     */
+    public void markFailed(String reason) {
+        this.status = PayoutStatus.FAILED;
+        this.failureReason = reason;
     }
 }

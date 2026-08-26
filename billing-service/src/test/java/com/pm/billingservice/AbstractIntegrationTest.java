@@ -64,5 +64,8 @@ public abstract class AbstractIntegrationTest {
         registry.add("spring.datasource.url", MARIADB::getJdbcUrl);
         registry.add("spring.datasource.username", MARIADB::getUsername);
         registry.add("spring.datasource.password", MARIADB::getPassword);
+        // Turn OFF the payout saga's periodic trigger so it can't race table resets between tests;
+        // the payout worker test drives the worker directly for deterministic behavior.
+        registry.add("payout.saga.enabled", () -> "false");
     }
 }
