@@ -222,6 +222,8 @@ services:
       auth-service-db:
         condition: service_healthy
     environment:
+      # Non-dev profile: base config + structured JSON (ECS) logging.
+      SPRING_PROFILES_ACTIVE: docker
       DB_URL: jdbc:mariadb://auth-service-db:3306/auth_db
       DB_USERNAME: auth
       DB_PASSWORD: auth
@@ -260,6 +262,8 @@ services:
       redis:
         condition: service_healthy
     environment:
+      # Non-dev profile: structured JSON (ECS) logging.
+      SPRING_PROFILES_ACTIVE: docker
       # Downstream services by their in-network hostnames.
       AUTH_SERVICE_URI: http://auth-service:4002
       PATIENT_SERVICE_URI: http://patient-service:4000
