@@ -52,6 +52,10 @@ public class LedgerEntry extends BaseEntity {
     @Column
     private UUID transferId;
 
+    /** Set only on a {@link Payout}'s legs (the DEBIT, and a compensating CREDIT on reversal); else null. */
+    @Column
+    private UUID payoutId;
+
     protected LedgerEntry() {
     }
 
@@ -92,6 +96,20 @@ public class LedgerEntry extends BaseEntity {
             UUID transferId) {
         LedgerEntry entry = new LedgerEntry(accountId, type, amount, balanceAfter, idempotencyKey, description);
         entry.transferId = transferId;
+        return entry;
+    }
+
+    /** Records one leg of a payout — same as {@link #record} but tagged with the {@code payoutId}. */
+    public static LedgerEntry payoutLeg(
+            UUID accountId,
+            EntryType type,
+            BigDecimal amount,
+            BigDecimal balanceAfter,
+            String idempotencyKey,
+            String description,
+            UUID payoutId) {
+        LedgerEntry entry = new LedgerEntry(accountId, type, amount, balanceAfter, idempotencyKey, description);
+        entry.payoutId = payoutId;
         return entry;
     }
 }
