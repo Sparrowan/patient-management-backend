@@ -259,6 +259,8 @@ services:
         condition: service_started
       billing-service:
         condition: service_started
+      analytics-service:
+        condition: service_started
       redis:
         condition: service_healthy
     environment:
@@ -268,6 +270,7 @@ services:
       AUTH_SERVICE_URI: http://auth-service:4002
       PATIENT_SERVICE_URI: http://patient-service:4000
       BILLING_SERVICE_URI: http://billing-service:4001
+      ANALYTICS_SERVICE_URI: http://analytics-service:4003
       # Edge JWT validation: fetch auth's JWKS over the compose network.
       AUTH_JWKS_URI: http://auth-service:4002/oauth2/jwks
       # Rate limiter's Redis + the browser origin(s) allowed through CORS.
@@ -313,6 +316,8 @@ services:
         condition: service_healthy
       schema-registry:
         condition: service_healthy
+      auth-service:
+        condition: service_started
     environment:
       SPRING_PROFILES_ACTIVE: docker
       DB_URL: jdbc:mariadb://analytics-service-db:3306/analytics_db
@@ -320,6 +325,8 @@ services:
       DB_PASSWORD: analytics
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      # Verify JWTs on the query API against auth-service's JWKS (in-network).
+      AUTH_JWKS_URI: http://auth-service:4002/oauth2/jwks
     ports:
       - "4003:4003"
     networks:
