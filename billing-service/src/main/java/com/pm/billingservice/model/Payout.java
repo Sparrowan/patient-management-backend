@@ -9,6 +9,7 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.UUID;
 import lombok.Getter;
 
@@ -56,6 +57,18 @@ public class Payout extends BaseEntity {
     @Column(length = 255)
     private String description;
 
+    /** Settlement attempts made by the saga worker so far. */
+    @Column(nullable = false)
+    private int attempts;
+
+    /** Earliest time the worker should (re)attempt settlement — moved forward on each retry (backoff). */
+    @Column(nullable = false)
+    private Instant nextAttemptAt;
+
+    /** Why the last settlement attempt failed; null while healthy. Diagnostic only. */
+    @Column(length = 255)
+    private String failureReason;
+
     protected Payout() {
     }
 
@@ -73,6 +86,8 @@ public class Payout extends BaseEntity {
         this.idempotencyKey = idempotencyKey;
         this.description = description;
         this.status = PayoutStatus.PENDING;
+        this.attempts = 0;
+        this.nextAttemptAt = Instant.now(); // due for settlement immediately
     }
 
     /**
@@ -88,5 +103,42 @@ public class Payout extends BaseEntity {
             String idempotencyKey,
             String description) {
         return new Payout(sourceAccountId, destinationReference, amount, currency, idempotencyKey, description);
+    }
+
+    /** The external rail confirmed settlement — terminal success. */
+    public void markCompleted() {
+        this.status = PayoutStatus.COMPLETED;
+    }
+
+    /**
+     * A settlement attempt failed transiently; schedule the next retry. Bumps {@link #attempts} and
+     * pushes {@link #nextAttemptAt} out so the worker backs off instead of hot-looping.
+     */
+    public void recordFailedAttempt(String reason, Instant nextAttemptAt) {
+        this.attempts++;
+        this.failureReason = reason;
+        this.nextAttemptAt = nextAttemptAt;
+    }
+
+    /**
+     * Compensation succeeded: settlement did not go through, so the debit was credited back to the
+     * source account and the payout is terminally {@link PayoutStatus#REVERSED}. Reached only from a
+     * <em>definitive</em> non-settlement (the rail declined) — where we know no money left — so
+     * crediting back cannot double-refund.
+     */
+    public void markReversed(String reason) {
+        this.status = PayoutStatus.REVERSED;
+        this.failureReason = reason;
+    }
+
+    /**
+     * Parks the payout as terminally {@link PayoutStatus#FAILED} — the outcome is <em>ambiguous</em>
+     * (retries exhausted on transient errors; a lost ack may mean the money actually left), so the
+     * debit is deliberately <b>not</b> auto-reversed: blindly crediting back could double-pay. It
+     * waits for reconciliation (query the rail's real status, then complete or reverse by hand).
+     */
+    public void markFailed(String reason) {
+        this.status = PayoutStatus.FAILED;
+        this.failureReason = reason;
     }
 }
