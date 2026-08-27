@@ -17,6 +17,8 @@ import com.pm.billingservice.repository.BillingAccountRepository;
 import com.pm.billingservice.repository.LedgerEntryRepository;
 import com.pm.billingservice.repository.PayoutRepository;
 
+import io.micrometer.observation.Observation;
+import io.micrometer.observation.ObservationRegistry;
 import lombok.RequiredArgsConstructor;
 
 /**
@@ -48,12 +50,20 @@ import lombok.RequiredArgsConstructor;
  *
  * <p>The periodic trigger is {@link PayoutSagaScheduler}; this class holds only the logic, so it can
  * be driven directly in a test without waiting on (or racing) the scheduler.
+ *
+ * <p><b>Observability:</b> each settlement step is wrapped in a Micrometer {@link Observation}
+ * ({@value #SETTLE_OBSERVATION}), which yields both a span and a timer tagged by {@code outcome}
+ * (settled / reversed / failed / retried) — the RED view of the saga, and (once the gateway is a real
+ * remote call) the parent span its outbound request nests under. Because the worker runs on a
+ * {@code @Scheduled} thread, that span roots at the tick, not the originating initiate request —
+ * the same background-job seam as the outbox relay (payout trace-continuity is a ROADMAP follow-up).
  */
 @Component
 @RequiredArgsConstructor
 public class PayoutSagaWorker {
 
     private static final Logger log = LoggerFactory.getLogger(PayoutSagaWorker.class);
+    private static final String SETTLE_OBSERVATION = "billing.payout.settle";
     private static final int BATCH_SIZE = 50;
     private static final int MAX_ATTEMPTS = 5;
     private static final long BASE_BACKOFF_MS = 2_000;
@@ -63,6 +73,7 @@ public class PayoutSagaWorker {
     private final ExternalSettlementGateway settlementGateway;
     private final BillingAccountRepository accountRepository;
     private final LedgerEntryRepository ledgerRepository;
+    private final ObservationRegistry observationRegistry;
 
     @Transactional
     public void drivePendingPayouts() {
@@ -79,22 +90,41 @@ public class PayoutSagaWorker {
         }
     }
 
-    /** Drives one claimed payout one step. The entity is managed, so state changes flush at commit. */
+    /**
+     * Drives one claimed payout one step, as an observed unit of work (span + timer). The entity is
+     * managed, so state changes flush at commit; the {@code outcome} tag is set once the step resolves.
+     */
     private void advance(Payout payout) {
-        SettlementOutcome outcome = settlementGateway.settle(
-                payout.getId(), payout.getDestinationReference(), payout.getAmount(), payout.getCurrency());
-        switch (outcome) {
-            case SETTLED -> payout.markCompleted();
-            case DECLINED -> compensate(payout, "Declined by the settlement rail");
+        Observation observation = Observation.createNotStarted(SETTLE_OBSERVATION, observationRegistry)
+                .highCardinalityKeyValue("payout.id", payout.getId().toString());
+        observation.observe(() -> {
+            SettlementOutcome outcome = settlementGateway.settle(
+                    payout.getId(), payout.getDestinationReference(), payout.getAmount(), payout.getCurrency());
+            observation.lowCardinalityKeyValue("outcome", applyOutcome(payout, outcome));
+        });
+    }
+
+    /** Applies the settlement outcome to the payout, returning a low-cardinality label for the metric. */
+    private String applyOutcome(Payout payout, SettlementOutcome outcome) {
+        return switch (outcome) {
+            case SETTLED -> {
+                payout.markCompleted();
+                yield "settled";
+            }
+            case DECLINED -> {
+                compensate(payout, "Declined by the settlement rail");
+                yield "reversed";
+            }
             case TRANSIENT_ERROR -> {
                 if (payout.getAttempts() + 1 >= MAX_ATTEMPTS) {
                     payout.markFailed("Exhausted retries after transient settlement errors");
-                } else {
-                    payout.recordFailedAttempt(
-                            "Transient settlement error", Instant.now().plusMillis(backoffMs(payout.getAttempts())));
+                    yield "failed";
                 }
+                payout.recordFailedAttempt(
+                        "Transient settlement error", Instant.now().plusMillis(backoffMs(payout.getAttempts())));
+                yield "retried";
             }
-        }
+        };
     }
 
     /**

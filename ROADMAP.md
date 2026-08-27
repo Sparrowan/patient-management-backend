@@ -186,9 +186,20 @@ cross-reference the backend-patterns catalog we're prioritizing for banking/fint
       slow/external leg it can't span in one tx): `Transfer.status` goes `COMPLETED` → `PENDING` +
       async worker (kick it off reliably via the **outbox**, or poll `PENDING` rows with **SKIP
       LOCKED** — the DB as job queue; RabbitMQ only if you need delay/priority/DLQ) → **orchestrated
-      saga** with a coordinator + compensation (`FAILED`/`REVERSED`). Still to add: that orchestrated
-      saga, and a **reconciliation job** for the accepted register→delete race (empty orphaned account
-      when async open lands after a sync delete). `[#56]`
+      saga** with a coordinator + compensation (`FAILED`/`REVERSED`). **That orchestrated saga is now
+      built**, as a first-class **external payout** (`POST /billing-accounts/payouts`): the source is
+      debited up front (`PENDING`); a **SKIP-LOCKED polling worker** (`PayoutSagaWorker`, mirroring the
+      outbox relay) drives settlement through an `ExternalSettlementGateway` with capped exponential
+      backoff; each outcome is terminal — `COMPLETED`, `REVERSED` (a *definitive* decline is
+      **compensated** — the debit is credited back as a double-entry `<key>:reversal` leg), or `FAILED`
+      (retries exhausted on *transient* errors — deliberately **not** auto-reversed: a lost ack could
+      mean the money actually left, so a blind credit-back would double-pay). Each settlement step is an
+      observed unit (`billing.payout.settle` span + `outcome`-tagged timer). Still to add: a
+      **reconciliation job** — for the accepted register→delete race (empty orphaned account when async
+      open lands after a sync delete), for `FAILED` payouts (query the rail's real status, then complete
+      or reverse), and for the rare closed-account-mid-reversal edge; and **payout trace-continuity**
+      (persist the initiate `traceparent` so the settlement span joins the originating request, like the
+      outbox relay). `[#56]`
 - [x] **Immutable ledger** for billing — append-only `ledger_entries` (each money movement with
       `balanceAfter`); full event-sourcing/double-entry is a later evolution. `[#53]`
 - [ ] **CDC streaming** for reconciliation/reporting. `[#99]`

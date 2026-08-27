@@ -366,8 +366,27 @@ compilation problems` / `No qualifying bean of type PatientMapper` at startup). 
       outbox relay publishes on a `@Scheduled` thread, so the Kafka trace roots at the relay tick, not
       the originating request — outbox trace-continuity (store+restore `traceparent`) is the next bit.
       Docker builds also cache the Maven repo via a BuildKit mount (only changed deps re-download).
-- [ ] Next: orchestrated saga (the async/cross-boundary transfer evolution), CDC (Debezium),
-      reconciliation. Background writes with no originating user (schedulers) still audit `"system"`.
+- [x] **Orchestrated payout saga (external money-out)** — a first-class **`Payout`** aggregate
+      (`POST /api/v1/billing-accounts/payouts`, admin-only, `Idempotency-Key`) for money leaving to an
+      external settlement rail — the case that genuinely *can't* span one ACID tx, so unlike the
+      same-DB `Transfer` it's a saga. **Reserve-then-settle-or-compensate:** initiate debits the source
+      up front (local ACID, `READ_COMMITTED` + pessimistic lock, double-entry `<key>:debit` leg) and
+      persists `PENDING`; a **`@Scheduled` `PayoutSagaWorker`** claims due rows with
+      `SELECT … FOR UPDATE SKIP LOCKED` (`idx_payouts_due`, multi-instance-safe — same pattern as the
+      outbox relay) and drives each through an `ExternalSettlementGateway` seam (a deterministic
+      simulated rail for now). Terminal states: `COMPLETED`; `REVERSED` — a **definitive** decline is
+      **compensated** (credit the debit back as a `<key>:reversal` leg → the saga's rollback); `FAILED`
+      — transient errors retried with capped exponential backoff, then parked. **The money-safety
+      call:** exhausted-retry `FAILED` is *not* auto-reversed — a transient/timeout outcome is ambiguous
+      (a lost ack may mean an attempt actually settled), so a blind credit-back could double-pay; it
+      waits for reconciliation. The scheduler is split from the worker (`@ConditionalOnProperty`) so
+      tests drive the logic without racing the trigger. Each settlement step is an observed unit
+      (`billing.payout.settle` span + `outcome`-tagged timer); the span roots at the `@Scheduled` tick
+      (same background-job seam as the outbox — payout trace-continuity is a follow-up). Verified
+      end-to-end through the gateway (`FAIL-` payout → `202 PENDING` → `REVERSED`, balance restored).
+- [ ] Next: CDC (Debezium); a **reconciliation job** (register→delete orphan, `FAILED`/ambiguous
+      payouts via a rail status-query, closed-account-mid-reversal edge). Background writes with no
+      originating user (schedulers) still audit `"system"`.
 
 **gRPC note:** uses **net.devh `grpc-spring-boot-starter` 3.1.0** on both sides, NOT the official
 `org.springframework.grpc` — its only published Boot starter (1.0.3) is binary-incompatible with

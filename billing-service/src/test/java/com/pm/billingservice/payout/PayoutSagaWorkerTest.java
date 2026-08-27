@@ -11,6 +11,7 @@ import com.pm.billingservice.model.PayoutStatus;
 import com.pm.billingservice.repository.BillingAccountRepository;
 import com.pm.billingservice.repository.LedgerEntryRepository;
 import com.pm.billingservice.repository.PayoutRepository;
+import io.micrometer.observation.ObservationRegistry;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Optional;
@@ -32,7 +33,8 @@ class PayoutSagaWorkerTest {
     @Mock private LedgerEntryRepository ledgerRepository;
 
     private PayoutSagaWorker worker() {
-        return new PayoutSagaWorker(payoutRepository, gateway, accountRepository, ledgerRepository);
+        return new PayoutSagaWorker(
+                payoutRepository, gateway, accountRepository, ledgerRepository, ObservationRegistry.NOOP);
     }
 
     private Payout pending() {
