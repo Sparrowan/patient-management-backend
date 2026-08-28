@@ -30,14 +30,17 @@ public class GatewayRoutesConfig {
     private final String authUri;
     private final String patientUri;
     private final String billingUri;
+    private final String analyticsUri;
 
     public GatewayRoutesConfig(
             @Value("${gateway.uris.auth:http://localhost:4002}") String authUri,
             @Value("${gateway.uris.patient:http://localhost:4000}") String patientUri,
-            @Value("${gateway.uris.billing:http://localhost:4001}") String billingUri) {
+            @Value("${gateway.uris.billing:http://localhost:4001}") String billingUri,
+            @Value("${gateway.uris.analytics:http://localhost:4003}") String analyticsUri) {
         this.authUri = authUri;
         this.patientUri = patientUri;
         this.billingUri = billingUri;
+        this.analyticsUri = analyticsUri;
     }
 
     @Bean
@@ -54,6 +57,9 @@ public class GatewayRoutesConfig {
                         .filters(rateLimit).uri(patientUri))
                 .route("billing", r -> r.path("/api/v1/billing-accounts/**")
                         .filters(rateLimit).uri(billingUri))
+                // analytics-service: read-only reporting over the projected read models.
+                .route("analytics", r -> r.path("/api/v1/analytics/**")
+                        .filters(rateLimit).uri(analyticsUri))
                 .build();
     }
 }

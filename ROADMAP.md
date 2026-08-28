@@ -158,7 +158,12 @@ cross-reference the backend-patterns catalog we're prioritizing for banking/fint
       a search index kept in sync off the **CDC / Kafka event stream** (search is a *read model*, never
       the source of truth — Postgres/MariaDB stays authoritative). Not before then — it's a whole
       component to run, and exact/prefix search doesn't justify it.
-- [ ] **CQRS read models** for reporting/statements. `[#54]`
+- [~] **CQRS read models** for reporting/statements. **Done:** `analytics-service` (`:4003`, own DB)
+      is a dedicated read side — projects `patient-events` into denormalized read models
+      (`daily_registrations` counter with a `processed_events` idempotency ledger; `active_patients`
+      convergent set) and serves read-only query endpoints; a newly-added projection backfills via an
+      admin **replay/rebuild** (seek the group to the topic start). **Next:** more read models
+      (billing statements/reporting), and CDC-fed projections as volume grows. `[#54]`
 - [ ] **Distributed locks** (Redlock/ZooKeeper) for singleton scheduled jobs (e.g. interest accrual). `[#90]`
 
 ### Event-driven & money (mostly `billing-service`)

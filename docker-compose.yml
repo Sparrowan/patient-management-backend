@@ -259,6 +259,8 @@ services:
         condition: service_started
       billing-service:
         condition: service_started
+      analytics-service:
+        condition: service_started
       redis:
         condition: service_healthy
     environment:
@@ -268,6 +270,7 @@ services:
       AUTH_SERVICE_URI: http://auth-service:4002
       PATIENT_SERVICE_URI: http://patient-service:4000
       BILLING_SERVICE_URI: http://billing-service:4001
+      ANALYTICS_SERVICE_URI: http://analytics-service:4003
       # Edge JWT validation: fetch auth's JWKS over the compose network.
       AUTH_JWKS_URI: http://auth-service:4002/oauth2/jwks
       # Rate limiter's Redis + the browser origin(s) allowed through CORS.
@@ -277,6 +280,57 @@ services:
       OTLP_TRACING_ENDPOINT: http://jaeger:4318/v1/traces
     ports:
       - "4004:4004"
+    networks:
+      - patient-net
+
+  # --- analytics-service (CQRS read side; projects events into read models) --------------------
+  # Its own database — the read side never shares a store with the write side (patient/billing).
+  analytics-service-db:
+    image: mariadb:11.7
+    container_name: analytics-service-db
+    environment:
+      MARIADB_DATABASE: analytics_db
+      MARIADB_USER: analytics
+      MARIADB_PASSWORD: analytics
+      MARIADB_ROOT_PASSWORD: root
+    volumes:
+      - analytics-db-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - patient-net
+
+  analytics-service:
+    build:
+      context: ./analytics-service
+    image: patient-management/analytics-service:latest
+    container_name: analytics-service
+    depends_on:
+      analytics-service-db:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      schema-registry:
+        condition: service_healthy
+      auth-service:
+        condition: service_started
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      DB_URL: jdbc:mariadb://analytics-service-db:3306/analytics_db
+      DB_USERNAME: analytics
+      DB_PASSWORD: analytics
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      # Verify JWTs on the query API against auth-service's JWKS (in-network).
+      AUTH_JWKS_URI: http://auth-service:4002/oauth2/jwks
+      # Export trace spans (OTLP/HTTP) to the Jaeger container.
+      OTLP_TRACING_ENDPOINT: http://jaeger:4318/v1/traces
+    ports:
+      - "4003:4003"
     networks:
       - patient-net
 
@@ -309,6 +363,7 @@ volumes:
   patient-db-data:
   billing-db-data:
   auth-db-data:
+  analytics-db-data:
 
 networks:
   patient-net:
