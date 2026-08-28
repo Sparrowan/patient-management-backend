@@ -1,5 +1,6 @@
 package com.pm.analyticsservice.controller;
 
+import com.pm.analyticsservice.dto.ActivePatientsView;
 import com.pm.analyticsservice.dto.DailyRegistrationView;
 import com.pm.analyticsservice.dto.RegistrationSummaryView;
 import com.pm.analyticsservice.service.AnalyticsQueryService;
@@ -42,5 +43,12 @@ public class AnalyticsController {
     @ApiResponse(responseCode = "200", description = "Total registrations and number of active days")
     public RegistrationSummaryView summary() {
         return analyticsQueryService.summary();
+    }
+
+    @GetMapping("/active")
+    @Operation(summary = "Live count of currently-active patients")
+    @ApiResponse(responseCode = "200", description = "The active-patient gauge")
+    public ActivePatientsView active() {
+        return new ActivePatientsView(analyticsQueryService.activePatientCount());
     }
 }

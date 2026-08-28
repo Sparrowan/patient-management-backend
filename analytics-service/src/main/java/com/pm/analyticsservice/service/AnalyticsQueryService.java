@@ -13,4 +13,7 @@ public interface AnalyticsQueryService {
 
     /** All-time roll-up (total registered + number of active days). */
     RegistrationSummaryView summary();
+
+    /** The live count of currently-active patients (from the active-patients set projection). */
+    long activePatientCount();
 }

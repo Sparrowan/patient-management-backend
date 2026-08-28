@@ -2,6 +2,7 @@ package com.pm.analyticsservice.service;
 
 import com.pm.analyticsservice.dto.DailyRegistrationView;
 import com.pm.analyticsservice.dto.RegistrationSummaryView;
+import com.pm.analyticsservice.repository.ActivePatientRepository;
 import com.pm.analyticsservice.repository.DailyRegistrationsRepository;
 import java.time.LocalDate;
 import java.util.List;
@@ -20,6 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class AnalyticsQueryServiceImpl implements AnalyticsQueryService {
 
     private final DailyRegistrationsRepository repository;
+    private final ActivePatientRepository activePatients;
 
     @Override
     @Transactional(readOnly = true)
@@ -31,5 +33,11 @@ public class AnalyticsQueryServiceImpl implements AnalyticsQueryService {
     @Transactional(readOnly = true)
     public RegistrationSummaryView summary() {
         return repository.summarize();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public long activePatientCount() {
+        return activePatients.count();
     }
 }
