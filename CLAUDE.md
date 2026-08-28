@@ -30,11 +30,11 @@ patient-management/
 ├── auth-service/        # JWT issuer: /login + /register, RSA-signed tokens, JWKS endpoint (:4002)
 ├── api-gateway/         # Spring Cloud Gateway — single entry point, routes to all services (:4004)
 ├── docker-compose.yml   # root orchestration: every service + a DB container each + Kafka/SR
-└── analytics-service/   # (planned) Kafka consumer, event-driven
+└── analytics-service/   # CQRS read side: projects patient-events into read models (:4003)
 ```
 
 **Ports:** gateway `:4004` (the single entry point clients use), patient `:4000`, billing `:4001`
-(+ gRPC `:9001`), auth `:4002`; kafka-ui `:8080`, schema-registry `:8081`.
+(+ gRPC `:9001`), auth `:4002`, analytics `:4003`; kafka-ui `:8080`, schema-registry `:8081`.
 
 Each service holds its own copy of `billing.proto` under `src/main/proto/` and generates its own
 stubs — a deliberate trade-off to keep services independently buildable (no shared module / no
@@ -384,6 +384,20 @@ compilation problems` / `No qualifying bean of type PatientMapper` at startup). 
       (`billing.payout.settle` span + `outcome`-tagged timer); the span roots at the `@Scheduled` tick
       (same background-job seam as the outbox — payout trace-continuity is a follow-up). Verified
       end-to-end through the gateway (`FAIL-` payout → `202 PENDING` → `REVERSED`, balance restored).
+- [x] **analytics-service — CQRS read side** (`:4003`, own `analytics_db`). No command API: its state
+      is built by **projecting** `patient-events` (its own consumer group) into denormalized **read
+      models**, served by read-only query endpoints (`/api/v1/analytics/{registrations,summary,active}`,
+      resource-server secured, gateway-routed). Two read models with two idempotency strategies:
+      `daily_registrations` is a **counter** guarded by a `processed_events` **ledger** (at-least-once
+      redelivery would otherwise double-count); `active_patients` is a **set** (row per active id) whose
+      add/remove-by-id is convergent, so it's idempotent with no ledger. One `PatientEventProjector`
+      owns every model an event touches, applied in one tx (two projectors sharing a per-`eventId`
+      ledger would starve each other). **Replay/rebuild:** admin `POST /api/v1/analytics/rebuild` wipes
+      the read models + ledger and seeks the consumer group to the topic start (`AbstractConsumerSeekAware`)
+      to re-project the whole history — the CQRS payoff (read models are disposable; the log is the
+      source of truth; a newly-added projection backfills by replay). Observability matches Tier 2
+      (Prometheus incl. a `analytics.events.projected` counter + Kafka consumer lag; tracing continues
+      the producer's traceparent into the projection; ECS JSON logs in the docker profile).
 - [ ] Next: CDC (Debezium); a **reconciliation job** (register→delete orphan, `FAILED`/ambiguous
       payouts via a rail status-query, closed-account-mid-reversal edge). Background writes with no
       originating user (schedulers) still audit `"system"`.

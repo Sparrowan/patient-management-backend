@@ -327,6 +327,8 @@ services:
       SCHEMA_REGISTRY_URL: http://schema-registry:8081
       # Verify JWTs on the query API against auth-service's JWKS (in-network).
       AUTH_JWKS_URI: http://auth-service:4002/oauth2/jwks
+      # Export trace spans (OTLP/HTTP) to the Jaeger container.
+      OTLP_TRACING_ENDPOINT: http://jaeger:4318/v1/traces
     ports:
       - "4003:4003"
     networks:

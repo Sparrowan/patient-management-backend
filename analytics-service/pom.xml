@@ -58,6 +58,24 @@
 			<artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
 			<version>2.8.17</version>
 		</dependency>
+		<!-- Prometheus metrics: /actuator/prometheus (JVM, HTTP, Hikari, Kafka consumer lag, plus the
+		     custom projection counter). Scraped by the Prometheus container. -->
+		<dependency>
+			<groupId>io.micrometer</groupId>
+			<artifactId>micrometer-registry-prometheus</artifactId>
+			<scope>runtime</scope>
+		</dependency>
+		<!-- Distributed tracing: Micrometer Tracing → OpenTelemetry → OTLP → Jaeger. With the Kafka
+		     listener observation flag on, the consumer continues the producer's W3C traceparent, so a
+		     projection shows up under the originating registration's trace. -->
+		<dependency>
+			<groupId>io.micrometer</groupId>
+			<artifactId>micrometer-tracing-bridge-otel</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>io.opentelemetry</groupId>
+			<artifactId>opentelemetry-exporter-otlp</artifactId>
+		</dependency>
 
 		<!-- JPA for the read models. They're plain projection tables (no rich domain / no @Version) —
 		     but JPA + a repository is still the least-friction way to read/write them. -->
