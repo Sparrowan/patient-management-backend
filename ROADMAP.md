@@ -25,8 +25,15 @@ cross-reference the backend-patterns catalog we're prioritizing for banking/fint
 - [x] **API versioning** — paths are under `/api/v1/...`. `[#62]`
 - [x] **ETag / conditional requests** — `GET /{id}` returns `@Version` as the ETag; `If-None-Match`
       → 304. (Writes use body-version optimistic locking, not `If-Match`.) `[#44/#45]`
-- [x] **Idempotency-Key** — done in `billing-service` credit/debit (required header, unique-key
-      replay, never double-applies). Backport to patient `POST` if needed. `[#1]`
+- [x] **Idempotency-Key** — two levels in `billing-service`. (1) **Domain** idempotency: a unique
+      `idempotency_key` column per aggregate (ledger/transfer/payout), the correctness backstop that
+      can never double-apply money. (2) **Generic HTTP layer**: an `@Idempotent` marker + a
+      `HandlerInterceptor` that claims a per-user `(user_sub, id_key)` row, replays the stored response
+      on a retry, and enforces the contract — `409` in-flight, `422` on key-reuse-with-different-body
+      (SHA-256 fingerprint), `400` on a missing key; caches only final responses (2xx/4xx, never 5xx);
+      24h TTL (hourly sweep) + a 60s claim lease so a dead request's key isn't wedged. The generic
+      layer *complements* the domain keys, it doesn't replace them. Backport to patient `POST` if
+      needed. `[#1]`
 
 ## Tier 2 — observability & ops (before traffic grows)
 

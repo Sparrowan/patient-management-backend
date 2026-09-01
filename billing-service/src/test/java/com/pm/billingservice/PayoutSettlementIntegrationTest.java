@@ -41,6 +41,7 @@ class PayoutSettlementIntegrationTest extends AbstractIntegrationTest {
     void resetData() {
         jdbcTemplate.execute("DELETE FROM ledger_entries");
         jdbcTemplate.execute("DELETE FROM payouts");
+        jdbcTemplate.execute("DELETE FROM idempotency_keys");
         jdbcTemplate.execute("DELETE FROM billing_accounts");
     }
 

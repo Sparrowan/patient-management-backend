@@ -38,6 +38,7 @@ class BillingAccountIntegrationTest extends AbstractIntegrationTest {
     void resetData() {
         // Delete child (ledger) before parent (accounts) to respect the FK.
         jdbcTemplate.execute("DELETE FROM ledger_entries");
+        jdbcTemplate.execute("DELETE FROM idempotency_keys");
         jdbcTemplate.execute("DELETE FROM billing_accounts");
     }
 

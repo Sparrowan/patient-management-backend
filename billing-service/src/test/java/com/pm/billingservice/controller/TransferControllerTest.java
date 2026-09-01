@@ -10,7 +10,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.pm.billingservice.config.SecurityConfig;
 import com.pm.billingservice.dto.TransferResponseDTO;
 import com.pm.billingservice.model.TransferStatus;
+import com.pm.billingservice.repository.IdempotencyRecordRepository;
 import com.pm.billingservice.service.TransferService;
+import com.pm.billingservice.support.MetricsTestConfig;
 import java.math.BigDecimal;
 import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
@@ -26,7 +28,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 /** Web-layer tests: controller + validation + security only, service mocked. */
 @WebMvcTest(TransferController.class)
-@Import(SecurityConfig.class)
+@Import({SecurityConfig.class, MetricsTestConfig.class})
 @WithMockUser(roles = "ADMIN") // transfers are money movement → admin-only; a USER-403 case is below
 @DisplayName("TransferController")
 class TransferControllerTest {
@@ -37,6 +39,9 @@ class TransferControllerTest {
     @Autowired private MockMvc mockMvc;
     @MockitoBean private TransferService transferService;
     @MockitoBean private JwtDecoder jwtDecoder; // satisfies the resource-server chain; unused with @WithMockUser
+    // The @Idempotent interceptor is loaded by @WebMvcTest via its WebMvcConfigurer; mock its store
+    // (returns Optional.empty() → the interceptor claims and proceeds, inert for these tests).
+    @MockitoBean private IdempotencyRecordRepository idempotencyRecordRepository;
 
     private String body(UUID from, UUID to, String amount) {
         return """
