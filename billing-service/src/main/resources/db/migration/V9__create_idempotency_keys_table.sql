@@ -17,7 +17,7 @@ CREATE TABLE idempotency_keys (
     user_sub              VARCHAR(100)  NOT NULL,
     request_method        VARCHAR(10)   NOT NULL,
     request_path          VARCHAR(255)  NOT NULL,
-    request_fingerprint   CHAR(64)      NOT NULL,          -- SHA-256 hex of method+path+body
+    request_fingerprint   VARCHAR(64)   NOT NULL,          -- SHA-256 hex of method+path+body
     status                VARCHAR(20)   NOT NULL,          -- IN_PROGRESS | COMPLETED
     response_status       INT,
     response_body         TEXT,

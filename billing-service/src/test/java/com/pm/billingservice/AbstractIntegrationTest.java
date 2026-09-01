@@ -67,5 +67,7 @@ public abstract class AbstractIntegrationTest {
         // Turn OFF the payout saga's periodic trigger so it can't race table resets between tests;
         // the payout worker test drives the worker directly for deterministic behavior.
         registry.add("payout.saga.enabled", () -> "false");
+        // Likewise the idempotency TTL sweep — the retention worker test drives it directly.
+        registry.add("idempotency.retention.enabled", () -> "false");
     }
 }

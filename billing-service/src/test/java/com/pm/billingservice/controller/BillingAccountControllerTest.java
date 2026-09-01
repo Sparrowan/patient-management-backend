@@ -17,7 +17,9 @@ import com.pm.billingservice.exception.BillingAccountNotFoundException;
 import com.pm.billingservice.exception.InsufficientFundsException;
 import com.pm.billingservice.model.AccountStatus;
 import com.pm.billingservice.model.EntryType;
+import com.pm.billingservice.repository.IdempotencyRecordRepository;
 import com.pm.billingservice.service.BillingAccountService;
+import com.pm.billingservice.support.MetricsTestConfig;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.UUID;
@@ -34,7 +36,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 /** Web-layer tests: controller + validation + global exception handler only, service mocked. */
 @WebMvcTest(BillingAccountController.class)
-@Import(SecurityConfig.class)
+@Import({SecurityConfig.class, MetricsTestConfig.class})
 @WithMockUser(roles = "ADMIN") // most billing ops (incl. money movement) need admin; a USER-403 case is below
 @DisplayName("BillingAccountController")
 class BillingAccountControllerTest {
@@ -45,6 +47,8 @@ class BillingAccountControllerTest {
     @Autowired private MockMvc mockMvc;
     @MockitoBean private BillingAccountService accountService;
     @MockitoBean private JwtDecoder jwtDecoder; // satisfies the resource-server chain; unused with @WithMockUser
+    // The @Idempotent interceptor is loaded by @WebMvcTest via its WebMvcConfigurer; mock its store.
+    @MockitoBean private IdempotencyRecordRepository idempotencyRecordRepository;
 
     private BillingAccountResponseDTO response() {
         return new BillingAccountResponseDTO(

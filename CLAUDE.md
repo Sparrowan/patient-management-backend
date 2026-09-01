@@ -176,6 +176,13 @@ com.pm.<service>/
   `sort` property throws `PropertyReferenceException` → mapped to 400 in the global handler.
 - **Every endpoint is documented** with springdoc OpenAPI (`@Operation`, `@ApiResponse`,
   `@Tag`) so `/swagger-ui.html` stays complete.
+- **Idempotency is two-level** (billing). A non-idempotent POST that a client may safely retry gets
+  the `@Idempotent` marker → the interceptor replays the original response for a repeated
+  `Idempotency-Key` (409 in-flight, 422 on same-key-different-body, 400 if missing; caches 2xx/4xx,
+  never 5xx). This is a *convenience* layer; where money moves, the aggregate's **unique
+  `idempotency_key` column stays the correctness backstop** (the generic layer can leave an
+  `IN_PROGRESS` row on a mid-request crash — the domain key still prevents a double-apply). Add the
+  generic layer on top; never rely on it *alone* for a money path.
 
 ### Event-driven / messaging conventions
 
@@ -384,6 +391,22 @@ compilation problems` / `No qualifying bean of type PatientMapper` at startup). 
       (`billing.payout.settle` span + `outcome`-tagged timer); the span roots at the `@Scheduled` tick
       (same background-job seam as the outbox — payout trace-continuity is a follow-up). Verified
       end-to-end through the gateway (`FAIL-` payout → `202 PENDING` → `REVERSED`, balance restored).
+- [x] **Generic HTTP idempotency layer (billing)** — a second, cross-cutting idempotency level on top
+      of the per-aggregate domain keys. An `@Idempotent` marker on a POST handler + a `HandlerInterceptor`
+      that claims a per-user `(user_sub, id_key)` row (a new infra table `idempotency_keys`, V9 — the
+      first non-`BaseEntity` table here), captures the response, and **replays it verbatim on a retry**
+      (`Idempotent-Replayed: true`) instead of re-running the handler. Enforces the contract: **409** if a
+      duplicate is in flight (live `IN_PROGRESS`, claimed via the unique constraint), **422** if the key
+      is reused with a different body (SHA-256 fingerprint of method+path+body), **400** if the header is
+      missing. Only **final** responses are cached (2xx + deterministic 4xx; a **5xx or unresolved throw
+      deletes the claim** so it stays retryable). Two leases: a **24h TTL** (replayable window, then the
+      key recycles; hourly `@Scheduled` sweep) and a **60s claim lease** so a dead request's key isn't
+      wedged (a later retry `reopen()`s it). Response capture uses a buffering filter
+      (`ContentCachingResponseWrapper` + a re-readable request body). **The seam (stated, not hidden):**
+      capture commits in a separate tx from the business change, so a crash between them can leave an
+      `IN_PROGRESS` row — which is exactly why this is a *convenience* layer and the **domain unique key
+      stays the correctness backstop for money**; even a double-take of a stale claim can't double-apply.
+      Wired on `credit` as the proving ground; the other money POSTs adopt `@Idempotent` next.
 - [x] **analytics-service — CQRS read side** (`:4003`, own `analytics_db`). No command API: its state
       is built by **projecting** `patient-events` (its own consumer group) into denormalized **read
       models**, served by read-only query endpoints (`/api/v1/analytics/{registrations,summary,active}`,

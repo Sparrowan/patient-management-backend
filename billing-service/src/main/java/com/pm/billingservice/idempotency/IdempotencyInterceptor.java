@@ -5,6 +5,7 @@ import com.pm.billingservice.exception.IdempotencyKeyMissingException;
 import com.pm.billingservice.exception.IdempotencyKeyReuseException;
 import com.pm.billingservice.model.IdempotencyRecord;
 import com.pm.billingservice.repository.IdempotencyRecordRepository;
+import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.nio.charset.StandardCharsets;
@@ -58,8 +59,15 @@ public class IdempotencyInterceptor implements HandlerInterceptor {
     /** How long an IN_PROGRESS claim is assumed live; past it the original is presumed dead and a retry takes over. */
     private static final Duration CLAIM_LEASE = Duration.ofSeconds(60);
     private static final String CAPTURE_ATTR = IdempotencyInterceptor.class.getName() + ".capture";
+    private static final String METRIC = "billing.idempotency.requests";
 
     private final IdempotencyRecordRepository repository;
+    private final MeterRegistry meterRegistry;
+
+    /** Counts an idempotency decision so replays/conflicts/reuse are visible in Prometheus. */
+    private void count(String outcome) {
+        meterRegistry.counter(METRIC, "outcome", outcome).increment();
+    }
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
@@ -68,6 +76,7 @@ public class IdempotencyInterceptor implements HandlerInterceptor {
         }
         String key = request.getHeader(HEADER);
         if (key == null || key.isBlank()) {
+            count("missing_key");
             throw new IdempotencyKeyMissingException(); // 400 — the layer enforces the header itself
         }
         String userSub = currentUserSub();
@@ -84,10 +93,12 @@ public class IdempotencyInterceptor implements HandlerInterceptor {
             boolean live = !record.isExpired(now);
             // A key that's still within its TTL must mean the same request; a different body is a client bug.
             if (live && !record.fingerprintMatches(fingerprint)) {
+                count("reuse");
                 throw new IdempotencyKeyReuseException(); // 422
             }
             if (record.isCompleted()) {
                 if (live) {
+                    count("replayed");
                     replay(response, record);
                     return false; // short-circuit — the original response is authoritative
                 }
@@ -96,9 +107,11 @@ public class IdempotencyInterceptor implements HandlerInterceptor {
             }
             // IN_PROGRESS:
             if (live && !record.isClaimStale(now, CLAIM_LEASE)) {
+                count("conflict");
                 throw new IdempotencyConflictException(); // 409 — a duplicate is genuinely in flight
             }
             // Stale claim (original died) or expired → take it over.
+            count("taken_over");
             return reopenAndClaim(request, record, fingerprint, now, userSub, key);
         }
 
@@ -106,9 +119,11 @@ public class IdempotencyInterceptor implements HandlerInterceptor {
             repository.saveAndFlush(IdempotencyRecord.start(
                     key, userSub, request.getMethod(), request.getRequestURI(), fingerprint, now, TTL));
             request.setAttribute(CAPTURE_ATTR, new CaptureContext(userSub, key));
+            count("new");
         } catch (DataIntegrityViolationException raceLost) {
             // A concurrent request won the unique-constraint claim between our lookup and insert — so a
             // duplicate is in flight right now: 409, same as the live IN_PROGRESS case above.
+            count("conflict");
             throw new IdempotencyConflictException();
         }
         return true;

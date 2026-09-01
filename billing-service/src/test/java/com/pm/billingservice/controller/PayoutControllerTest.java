@@ -10,7 +10,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.pm.billingservice.config.SecurityConfig;
 import com.pm.billingservice.dto.PayoutResponseDTO;
 import com.pm.billingservice.model.PayoutStatus;
+import com.pm.billingservice.repository.IdempotencyRecordRepository;
 import com.pm.billingservice.service.PayoutService;
+import com.pm.billingservice.support.MetricsTestConfig;
 import java.math.BigDecimal;
 import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
@@ -26,7 +28,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 /** Web-layer tests: controller + validation + security only, service mocked. */
 @WebMvcTest(PayoutController.class)
-@Import(SecurityConfig.class)
+@Import({SecurityConfig.class, MetricsTestConfig.class})
 @WithMockUser(roles = "ADMIN") // payouts are money movement → admin-only; a USER-403 case is below
 @DisplayName("PayoutController")
 class PayoutControllerTest {
@@ -37,6 +39,8 @@ class PayoutControllerTest {
     @Autowired private MockMvc mockMvc;
     @MockitoBean private PayoutService payoutService;
     @MockitoBean private JwtDecoder jwtDecoder; // satisfies the resource-server chain; unused with @WithMockUser
+    // The @Idempotent interceptor is loaded by @WebMvcTest via its WebMvcConfigurer; mock its store.
+    @MockitoBean private IdempotencyRecordRepository idempotencyRecordRepository;
 
     private String body(String amount) {
         return """
