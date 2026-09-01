@@ -28,7 +28,6 @@ import org.springframework.data.domain.AuditorAware;
 import com.pm.patientservice.config.CacheConfig;
 import lombok.RequiredArgsConstructor;
 import org.springframework.cache.annotation.CacheEvict;
-import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.domain.Pageable;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
@@ -49,6 +48,7 @@ public class PatientServiceImpl implements PatientService {
     private final AuditorAware<String> auditorAware;
     private final Tracer tracer;
     private final Propagator propagator;
+    private final PatientCacheReader patientCacheReader;
 
     @Override
     @Transactional(readOnly = true)
@@ -57,13 +57,12 @@ public class PatientServiceImpl implements PatientService {
     }
 
     @Override
-    @Transactional(readOnly = true)
-    @Cacheable(cacheNames = CacheConfig.PATIENTS_CACHE, key = "#id")
     public PatientResponseDTO getPatient(UUID id) {
-        // On a cache hit the cache advisor short-circuits before this body runs, so no DB round-trip
-        // (and the read-only tx is never opened). A miss runs the load and caches the returned DTO.
-        // A PatientNotFoundException (404) propagates uncached — negative caching is a later bit.
-        return patientMapper.toResponse(findByIdOrThrow(id));
+        // Delegates to the cache-aside reader: a hit returns without touching the DB or opening a tx;
+        // a miss loads + caches (an absence is negatively cached). The service keeps ownership of the
+        // not-found contract — it throws, the reader just returns Optional so absence is cacheable.
+        return patientCacheReader.find(id)
+                .orElseThrow(() -> new PatientNotFoundException(id));
     }
 
     @Override

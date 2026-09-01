@@ -3,6 +3,7 @@ package com.pm.patientservice.config;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pm.patientservice.dto.PatientResponseDTO;
 import java.time.Duration;
+import java.util.concurrent.ThreadLocalRandom;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -15,6 +16,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.cache.RedisCacheConfiguration;
 import org.springframework.data.redis.cache.RedisCacheManager;
+import org.springframework.data.redis.cache.RedisCacheWriter.TtlFunction;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.serializer.Jackson2JsonRedisSerializer;
 import org.springframework.data.redis.serializer.RedisSerializationContext.SerializationPair;
@@ -35,7 +37,10 @@ import org.springframework.data.redis.serializer.StringRedisSerializer;
  * (Note the eviction caveat: swallowing an <em>evict</em> error can leave a stale entry until its TTL
  * lapses — the bounded TTL is the backstop.)
  *
- * <p>TTL is fixed here; jitter + stampede protection come in a later bit.
+ * <p><b>Stampede protection:</b> per-entry TTL carries jitter (see {@link #jitteredTtl()}) so keys
+ * don't expire in lockstep; single-flight ({@code sync=true}) lives on the cached reader. Absent
+ * lookups are negatively cached too (same jittered base TTL — {@link #jitteredTtl()} explains why a
+ * shorter negative TTL isn't used alongside {@code sync=true}).
  */
 @Configuration
 @EnableCaching
@@ -46,7 +51,10 @@ public class CacheConfig implements CachingConfigurer {
 
     /** Cache name for single-patient reads. */
     public static final String PATIENTS_CACHE = "patients";
-    private static final Duration PATIENTS_TTL = Duration.ofMinutes(10);
+    /** Base TTL for a cached entry (hit or negatively-cached miss). */
+    private static final Duration BASE_TTL = Duration.ofMinutes(10);
+    /** ±fraction of jitter applied to the base TTL so keys don't all expire on the same tick. */
+    private static final double JITTER_RATIO = 0.2;
 
     private final ObjectMapper objectMapper;
 
@@ -59,7 +67,7 @@ public class CacheConfig implements CachingConfigurer {
     @ConditionalOnProperty(name = "spring.cache.type", havingValue = "redis", matchIfMissing = true)
     public RedisCacheManager cacheManager(RedisConnectionFactory connectionFactory) {
         RedisCacheConfiguration defaults = RedisCacheConfiguration.defaultCacheConfig()
-                .entryTtl(PATIENTS_TTL)
+                .entryTtl(jitteredTtl())
                 .prefixCacheNameWith("patient-service::")
                 .serializeKeysWith(SerializationPair.fromSerializer(new StringRedisSerializer()));
 
@@ -71,6 +79,24 @@ public class CacheConfig implements CachingConfigurer {
                 .cacheDefaults(defaults)
                 .withCacheConfiguration(PATIENTS_CACHE, patients)
                 .build();
+    }
+
+    /**
+     * Per-entry TTL: {@link #BASE_TTL} ± {@link #JITTER_RATIO} of <b>jitter</b>, so a burst of keys
+     * populated together don't all expire on the same second and manufacture a stampede on a timer.
+     *
+     * <p><b>Why not a per-value TTL</b> (e.g. a shorter TTL for negatively-cached misses)? Because the
+     * reader uses {@code sync = true}, and in the synchronized path Spring Data Redis computes the TTL
+     * <em>before</em> loading the value — so a value-aware {@code TtlFunction} would see {@code null}
+     * for every entry and mis-classify hits as misses. Single-flight (sync) is worth more here than a
+     * shorter negative TTL, so we keep sync and give every entry the same jittered base TTL. That's
+     * safe: keys are unguessable UUID PKs that are never reused, so a lingering cached miss is harmless.
+     */
+    private TtlFunction jitteredTtl() {
+        return (key, value) -> {
+            double factor = 1.0 + (ThreadLocalRandom.current().nextDouble() * 2.0 - 1.0) * JITTER_RATIO;
+            return Duration.ofMillis((long) (BASE_TTL.toMillis() * factor));
+        };
     }
 
     @Override

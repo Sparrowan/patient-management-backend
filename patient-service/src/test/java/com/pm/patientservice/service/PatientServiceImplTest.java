@@ -55,6 +55,7 @@ class PatientServiceImplTest {
 
     @Mock private PatientRepository patientRepository;
     @Mock private PatientMapper patientMapper;
+    @Mock private PatientCacheReader patientCacheReader;
     @Mock private OutboxEventRepository outboxRepository;
     @Mock private BillingGrpcClient billingGrpcClient;
     // Default Mockito answer for an Optional-returning method is Optional.empty() → actor "system".
@@ -101,12 +102,12 @@ class PatientServiceImplTest {
     @DisplayName("getPatient")
     class GetPatient {
 
+        // getPatient now reads through the cache-aside reader; the reader owns the repository/mapper
+        // (and the negative-cache Optional), so the service test stubs the reader.
         @Test
         @DisplayName("returns the patient when it exists")
         void returnsPatient() {
-            Patient patient = existingPatient();
-            when(patientRepository.findById(ID)).thenReturn(Optional.of(patient));
-            when(patientMapper.toResponse(patient)).thenReturn(responseDto());
+            when(patientCacheReader.find(ID)).thenReturn(Optional.of(responseDto()));
 
             assertThat(patientService.getPatient(ID)).isEqualTo(responseDto());
         }
@@ -114,7 +115,7 @@ class PatientServiceImplTest {
         @Test
         @DisplayName("throws PatientNotFoundException when absent")
         void throwsWhenMissing() {
-            when(patientRepository.findById(ID)).thenReturn(Optional.empty());
+            when(patientCacheReader.find(ID)).thenReturn(Optional.empty());
 
             assertThatThrownBy(() -> patientService.getPatient(ID))
                     .isInstanceOf(PatientNotFoundException.class);
