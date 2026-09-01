@@ -1,5 +1,8 @@
 package com.pm.billingservice.idempotency;
 
+import com.pm.billingservice.exception.IdempotencyConflictException;
+import com.pm.billingservice.exception.IdempotencyKeyMissingException;
+import com.pm.billingservice.exception.IdempotencyKeyReuseException;
 import com.pm.billingservice.model.IdempotencyRecord;
 import com.pm.billingservice.repository.IdempotencyRecordRepository;
 import jakarta.servlet.http.HttpServletRequest;
@@ -49,7 +52,11 @@ public class IdempotencyInterceptor implements HandlerInterceptor {
     private static final Logger log = LoggerFactory.getLogger(IdempotencyInterceptor.class);
 
     static final String HEADER = "Idempotency-Key";
+    static final String REPLAYED_HEADER = "Idempotent-Replayed";
+    /** How long a completed response stays replayable; after this a key may be reused (Stripe's 24h). */
     private static final Duration TTL = Duration.ofHours(24);
+    /** How long an IN_PROGRESS claim is assumed live; past it the original is presumed dead and a retry takes over. */
+    private static final Duration CLAIM_LEASE = Duration.ofSeconds(60);
     private static final String CAPTURE_ATTR = IdempotencyInterceptor.class.getName() + ".capture";
 
     private final IdempotencyRecordRepository repository;
@@ -60,36 +67,59 @@ public class IdempotencyInterceptor implements HandlerInterceptor {
             return true; // not an @Idempotent endpoint — no-op
         }
         String key = request.getHeader(HEADER);
+        if (key == null || key.isBlank()) {
+            throw new IdempotencyKeyMissingException(); // 400 — the layer enforces the header itself
+        }
         String userSub = currentUserSub();
-        if (key == null || key.isBlank() || userSub == null) {
-            // Missing header / unauthenticated: let the normal request path handle it (the controller's
-            // required @RequestHeader → 400; security → 401). Hardened into explicit errors next.
-            return true;
+        if (userSub == null) {
+            return true; // unauthenticated: let the security chain answer (shouldn't reach a secured handler)
         }
 
+        String fingerprint = fingerprint(request);
+        Instant now = Instant.now();
         Optional<IdempotencyRecord> existing = repository.findByUserSubAndIdKey(userSub, key);
+
         if (existing.isPresent()) {
             IdempotencyRecord record = existing.get();
-            if (record.isCompleted() && !record.isExpired(Instant.now())) {
-                replay(response, record);
-                return false; // short-circuit — do not run the handler again
+            boolean live = !record.isExpired(now);
+            // A key that's still within its TTL must mean the same request; a different body is a client bug.
+            if (live && !record.fingerprintMatches(fingerprint)) {
+                throw new IdempotencyKeyReuseException(); // 422
             }
-            // In-progress (a concurrent duplicate) or expired: fall through and let it run. The domain
-            // unique key still prevents a double-apply; refined into a 409 for the in-flight case next.
-            request.setAttribute(CAPTURE_ATTR, new CaptureContext(userSub, key));
-            return true;
+            if (record.isCompleted()) {
+                if (live) {
+                    replay(response, record);
+                    return false; // short-circuit — the original response is authoritative
+                }
+                // TTL lapsed → the key is recycled: re-open for a fresh attempt.
+                return reopenAndClaim(request, record, fingerprint, now, userSub, key);
+            }
+            // IN_PROGRESS:
+            if (live && !record.isClaimStale(now, CLAIM_LEASE)) {
+                throw new IdempotencyConflictException(); // 409 — a duplicate is genuinely in flight
+            }
+            // Stale claim (original died) or expired → take it over.
+            return reopenAndClaim(request, record, fingerprint, now, userSub, key);
         }
 
         try {
             repository.saveAndFlush(IdempotencyRecord.start(
-                    key, userSub, request.getMethod(), request.getRequestURI(),
-                    fingerprint(request), Instant.now(), TTL));
+                    key, userSub, request.getMethod(), request.getRequestURI(), fingerprint, now, TTL));
             request.setAttribute(CAPTURE_ATTR, new CaptureContext(userSub, key));
         } catch (DataIntegrityViolationException raceLost) {
-            // Another request claimed the same key first (unique constraint). Proceed without owning the
-            // capture; domain idempotency backstops correctness. Turned into a 409 in the next bit.
-            log.debug("Lost idempotency claim race for key (user scoped) — proceeding without capture");
+            // A concurrent request won the unique-constraint claim between our lookup and insert — so a
+            // duplicate is in flight right now: 409, same as the live IN_PROGRESS case above.
+            throw new IdempotencyConflictException();
         }
+        return true;
+    }
+
+    private boolean reopenAndClaim(
+            HttpServletRequest request, IdempotencyRecord record, String fingerprint,
+            Instant now, String userSub, String key) {
+        record.reopen(fingerprint, now, TTL);
+        repository.saveAndFlush(record);
+        request.setAttribute(CAPTURE_ATTR, new CaptureContext(userSub, key));
         return true;
     }
 
@@ -98,7 +128,7 @@ public class IdempotencyInterceptor implements HandlerInterceptor {
             HttpServletRequest request, HttpServletResponse response, Object handler, Exception ex) {
         Object attr = request.getAttribute(CAPTURE_ATTR);
         if (!(attr instanceof CaptureContext context)) {
-            return; // we didn't claim this request (replay, non-idempotent, or lost race)
+            return; // we didn't claim this request (replay, non-idempotent, or a conflict)
         }
         Optional<IdempotencyRecord> maybe = repository.findByUserSubAndIdKey(context.userSub(), context.key());
         if (maybe.isEmpty()) {
@@ -108,8 +138,12 @@ public class IdempotencyInterceptor implements HandlerInterceptor {
         if (record.isCompleted()) {
             return; // already captured elsewhere
         }
-        if (ex != null) {
-            repository.delete(record); // request failed — free the key for a clean retry
+        int status = response.getStatus();
+        // Only cache a FINAL response. A 5xx (or an unresolved throw) is transient — delete the claim so
+        // the key is free for a clean retry; caching it would pin a client to a one-off server error.
+        // 2xx and deterministic 4xx (validation, insufficient funds, ...) are stable → cache and replay.
+        if (ex != null || status >= 500) {
+            repository.delete(record);
             return;
         }
         ContentCachingResponseWrapper wrapper =
@@ -117,7 +151,7 @@ public class IdempotencyInterceptor implements HandlerInterceptor {
         String body = wrapper != null
                 ? new String(wrapper.getContentAsByteArray(), StandardCharsets.UTF_8)
                 : "";
-        record.complete(response.getStatus(), body, response.getContentType());
+        record.complete(status, body, response.getContentType());
         repository.save(record);
     }
 
@@ -125,6 +159,7 @@ public class IdempotencyInterceptor implements HandlerInterceptor {
     private void replay(HttpServletResponse response, IdempotencyRecord record) {
         try {
             response.setStatus(record.getResponseStatus());
+            response.setHeader(REPLAYED_HEADER, "true"); // let clients/observability see a replay
             if (record.getResponseContentType() != null) {
                 response.setContentType(record.getResponseContentType());
             }

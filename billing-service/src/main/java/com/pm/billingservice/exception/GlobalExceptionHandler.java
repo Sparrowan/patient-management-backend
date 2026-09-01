@@ -82,6 +82,28 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         return problem;
     }
 
+    @ExceptionHandler(IdempotencyKeyMissingException.class)
+    public ProblemDetail handleIdempotencyKeyMissing(IdempotencyKeyMissingException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
+        problem.setTitle("Idempotency key required");
+        return problem;
+    }
+
+    @ExceptionHandler(IdempotencyConflictException.class)
+    public ProblemDetail handleIdempotencyConflict(IdempotencyConflictException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
+        problem.setTitle("Request in progress");
+        return problem;
+    }
+
+    @ExceptionHandler(IdempotencyKeyReuseException.class)
+    public ProblemDetail handleIdempotencyKeyReuse(IdempotencyKeyReuseException ex) {
+        ProblemDetail problem =
+                ProblemDetail.forStatusAndDetail(HttpStatus.UNPROCESSABLE_ENTITY, ex.getMessage());
+        problem.setTitle("Idempotency key reuse");
+        return problem;
+    }
+
     @ExceptionHandler(PropertyReferenceException.class)
     public ProblemDetail handleInvalidSort(PropertyReferenceException ex) {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(

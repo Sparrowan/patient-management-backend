@@ -110,11 +110,35 @@ public class IdempotencyRecord {
         this.status = IdempotencyStatus.COMPLETED;
     }
 
+    /**
+     * Re-open a record for a fresh attempt with the same key — used when the previous use has expired
+     * (recycled key) or its {@code IN_PROGRESS} claim went stale (the original request died). Resets to
+     * {@code IN_PROGRESS}, clears the captured response, and stamps a new fingerprint and TTL.
+     */
+    public void reopen(String requestFingerprint, Instant now, java.time.Duration ttl) {
+        this.requestFingerprint = requestFingerprint;
+        this.status = IdempotencyStatus.IN_PROGRESS;
+        this.responseStatus = null;
+        this.responseBody = null;
+        this.responseContentType = null;
+        this.createdAt = now;
+        this.expiresAt = now.plus(ttl);
+    }
+
     public boolean isCompleted() {
         return status == IdempotencyStatus.COMPLETED;
     }
 
     public boolean isExpired(Instant now) {
         return now.isAfter(expiresAt);
+    }
+
+    /** True once an {@code IN_PROGRESS} claim has outlived {@code lease} — the original likely died. */
+    public boolean isClaimStale(Instant now, java.time.Duration lease) {
+        return now.isAfter(createdAt.plus(lease));
+    }
+
+    public boolean fingerprintMatches(String other) {
+        return requestFingerprint.equals(other);
     }
 }
