@@ -25,7 +25,9 @@ import java.util.Map;
 import java.util.UUID;
 import org.springframework.data.domain.AuditorAware;
 
+import com.pm.patientservice.config.CacheConfig;
 import lombok.RequiredArgsConstructor;
+import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.data.domain.Pageable;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
@@ -46,6 +48,7 @@ public class PatientServiceImpl implements PatientService {
     private final AuditorAware<String> auditorAware;
     private final Tracer tracer;
     private final Propagator propagator;
+    private final PatientCacheReader patientCacheReader;
 
     @Override
     @Transactional(readOnly = true)
@@ -54,9 +57,12 @@ public class PatientServiceImpl implements PatientService {
     }
 
     @Override
-    @Transactional(readOnly = true)
     public PatientResponseDTO getPatient(UUID id) {
-        return patientMapper.toResponse(findByIdOrThrow(id));
+        // Delegates to the cache-aside reader: a hit returns without touching the DB or opening a tx;
+        // a miss loads + caches (an absence is negatively cached). The service keeps ownership of the
+        // not-found contract — it throws, the reader just returns Optional so absence is cacheable.
+        return patientCacheReader.find(id)
+                .orElseThrow(() -> new PatientNotFoundException(id));
     }
 
     @Override
@@ -111,6 +117,7 @@ public class PatientServiceImpl implements PatientService {
 
     @Override
     @Transactional
+    @CacheEvict(cacheNames = CacheConfig.PATIENTS_CACHE, key = "#id")
     public PatientResponseDTO updatePatient(UUID id, PatientUpdateRequestDTO request) {
         Patient patient = findByIdOrThrow(id);
         // Optimistic concurrency: reject if the client edited a now-stale version. Hibernate's
@@ -130,6 +137,7 @@ public class PatientServiceImpl implements PatientService {
 
     @Override
     @Transactional
+    @CacheEvict(cacheNames = CacheConfig.PATIENTS_CACHE, key = "#id")
     public void deletePatient(UUID id) {
         Patient patient = findByIdOrThrow(id); // 404 if unknown/already deleted
         // Synchronous veto (mTLS gRPC): billing closes an empty account, or rejects → 409 if it

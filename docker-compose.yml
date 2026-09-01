@@ -121,11 +121,15 @@ services:
         condition: service_started
       auth-service:
         condition: service_started
+      redis:
+        condition: service_healthy
     environment:
       # Points at the DB container over the compose network (service name is the hostname).
       DB_URL: jdbc:mariadb://patient-service-db:3306/patient_db
       DB_USERNAME: patient
       DB_PASSWORD: patient
+      # Redis for cache-aside on GET /{id} (shared with the gateway's rate limiter).
+      REDIS_HOST: redis
       # Non-dev profile: base config, no SQL logging.
       SPRING_PROFILES_ACTIVE: docker
       # Event backbone (in-network hostnames).
