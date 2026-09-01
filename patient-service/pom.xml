@@ -58,6 +58,16 @@
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-actuator</artifactId>
 		</dependency>
+		<!-- Caching: Spring Cache abstraction (@Cacheable/@CacheEvict) backed by Redis, for
+		     cache-aside on the read-heavy GET /{id}. Reuses the Redis the gateway already runs. -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-cache</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-data-redis</artifactId>
+		</dependency>
 		<!-- Prometheus metrics: exposes /actuator/prometheus (JVM, HTTP, Hikari, etc.). -->
 		<dependency>
 			<groupId>io.micrometer</groupId>
