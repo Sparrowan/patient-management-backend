@@ -5,6 +5,7 @@ import com.pm.billingservice.dto.LedgerEntryResponseDTO;
 import com.pm.billingservice.dto.MoneyMovementRequestDTO;
 import com.pm.billingservice.dto.OpenAccountRequestDTO;
 import com.pm.billingservice.dto.PagedResponse;
+import com.pm.billingservice.idempotency.Idempotent;
 import com.pm.billingservice.service.BillingAccountService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
@@ -80,6 +81,7 @@ public class BillingAccountController {
     @ApiResponse(responseCode = "404", description = "No such account")
     @PostMapping("/{id}/credit")
     @PreAuthorize("hasRole('ADMIN')")
+    @Idempotent
     public LedgerEntryResponseDTO credit(
             @PathVariable UUID id,
             @Valid @RequestBody MoneyMovementRequestDTO request,
