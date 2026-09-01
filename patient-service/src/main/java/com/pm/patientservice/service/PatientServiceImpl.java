@@ -25,7 +25,10 @@ import java.util.Map;
 import java.util.UUID;
 import org.springframework.data.domain.AuditorAware;
 
+import com.pm.patientservice.config.CacheConfig;
 import lombok.RequiredArgsConstructor;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.domain.Pageable;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
@@ -55,7 +58,11 @@ public class PatientServiceImpl implements PatientService {
 
     @Override
     @Transactional(readOnly = true)
+    @Cacheable(cacheNames = CacheConfig.PATIENTS_CACHE, key = "#id")
     public PatientResponseDTO getPatient(UUID id) {
+        // On a cache hit the cache advisor short-circuits before this body runs, so no DB round-trip
+        // (and the read-only tx is never opened). A miss runs the load and caches the returned DTO.
+        // A PatientNotFoundException (404) propagates uncached — negative caching is a later bit.
         return patientMapper.toResponse(findByIdOrThrow(id));
     }
 
@@ -111,6 +118,7 @@ public class PatientServiceImpl implements PatientService {
 
     @Override
     @Transactional
+    @CacheEvict(cacheNames = CacheConfig.PATIENTS_CACHE, key = "#id")
     public PatientResponseDTO updatePatient(UUID id, PatientUpdateRequestDTO request) {
         Patient patient = findByIdOrThrow(id);
         // Optimistic concurrency: reject if the client edited a now-stale version. Hibernate's
@@ -130,6 +138,7 @@ public class PatientServiceImpl implements PatientService {
 
     @Override
     @Transactional
+    @CacheEvict(cacheNames = CacheConfig.PATIENTS_CACHE, key = "#id")
     public void deletePatient(UUID id) {
         Patient patient = findByIdOrThrow(id); // 404 if unknown/already deleted
         // Synchronous veto (mTLS gRPC): billing closes an empty account, or rejects → 409 if it

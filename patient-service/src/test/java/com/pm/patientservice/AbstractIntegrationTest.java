@@ -75,5 +75,9 @@ public abstract class AbstractIntegrationTest {
         registry.add("spring.datasource.url", MARIADB::getJdbcUrl);
         registry.add("spring.datasource.username", MARIADB::getUsername);
         registry.add("spring.datasource.password", MARIADB::getPassword);
+        // Disable caching in tests: the DB is truncated directly between cases (not via deletePatient),
+        // which wouldn't evict a cache, so a live Redis would serve stale entries. Cache-aside behavior
+        // is verified live in Docker instead. NONE swaps in a no-op CacheManager.
+        registry.add("spring.cache.type", () -> "none");
     }
 }
