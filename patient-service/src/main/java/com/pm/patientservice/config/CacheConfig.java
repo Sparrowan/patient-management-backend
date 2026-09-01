@@ -38,9 +38,9 @@ import org.springframework.data.redis.serializer.StringRedisSerializer;
  * lapses — the bounded TTL is the backstop.)
  *
  * <p><b>Stampede protection:</b> per-entry TTL carries jitter (see {@link #jitteredTtl()}) so keys
- * don't expire in lockstep; single-flight ({@code sync=true}) lives on the cached reader. Absent
- * lookups are negatively cached too (same jittered base TTL — {@link #jitteredTtl()} explains why a
- * shorter negative TTL isn't used alongside {@code sync=true}).
+ * don't expire in lockstep; single-flight is enforced <em>across replicas</em> by a Redis distributed
+ * lock in {@code PatientCacheReader} (the cross-instance upgrade over Spring's per-JVM
+ * {@code sync=true}). Absent lookups are negatively cached too, at the same jittered base TTL.
  */
 @Configuration
 @EnableCaching
@@ -85,12 +85,12 @@ public class CacheConfig implements CachingConfigurer {
      * Per-entry TTL: {@link #BASE_TTL} ± {@link #JITTER_RATIO} of <b>jitter</b>, so a burst of keys
      * populated together don't all expire on the same second and manufacture a stampede on a timer.
      *
-     * <p><b>Why not a per-value TTL</b> (e.g. a shorter TTL for negatively-cached misses)? Because the
-     * reader uses {@code sync = true}, and in the synchronized path Spring Data Redis computes the TTL
-     * <em>before</em> loading the value — so a value-aware {@code TtlFunction} would see {@code null}
-     * for every entry and mis-classify hits as misses. Single-flight (sync) is worth more here than a
-     * shorter negative TTL, so we keep sync and give every entry the same jittered base TTL. That's
-     * safe: keys are unguessable UUID PKs that are never reused, so a lingering cached miss is harmless.
+     * <p>The TTL is uniform for hits and negatively-cached misses alike. A shorter TTL just for misses
+     * is now technically possible — the reader does a manual {@code cache.put}, so a value-aware
+     * {@link TtlFunction} would see the real value (unlike Spring's {@code sync=true} path, which
+     * computes the TTL <em>before</em> loading and always sees {@code null}). It's deliberately not
+     * used: keys are unguessable UUID PKs that are never reused, so a lingering cached miss is harmless
+     * and not worth the extra branch.
      */
     private TtlFunction jitteredTtl() {
         return (key, value) -> {
