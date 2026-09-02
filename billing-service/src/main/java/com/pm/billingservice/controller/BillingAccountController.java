@@ -1,6 +1,7 @@
 package com.pm.billingservice.controller;
 
 import com.pm.billingservice.dto.BillingAccountResponseDTO;
+import com.pm.billingservice.dto.CursorPage;
 import com.pm.billingservice.dto.LedgerEntryResponseDTO;
 import com.pm.billingservice.dto.MoneyMovementRequestDTO;
 import com.pm.billingservice.dto.OpenAccountRequestDTO;
@@ -25,6 +26,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -114,5 +116,20 @@ public class BillingAccountController {
             @ParameterObject @PageableDefault(size = 20, sort = "createdAt", direction = Sort.Direction.DESC)
                     Pageable pageable) {
         return accountService.getLedger(id, pageable);
+    }
+
+    @Operation(
+            summary = "Page an account's ledger by cursor (keyset)",
+            description = "Scalable pagination for a large history: pass no cursor for the first page, "
+                    + "then echo nextCursor until hasMore is false. O(limit) at any depth; no total count.")
+    @ApiResponse(responseCode = "200", description = "A page of entries, newest first")
+    @ApiResponse(responseCode = "400", description = "Malformed cursor")
+    @ApiResponse(responseCode = "404", description = "No such account")
+    @GetMapping("/{id}/ledger/keyset")
+    public CursorPage<LedgerEntryResponseDTO> getLedgerPage(
+            @PathVariable UUID id,
+            @RequestParam(required = false) String cursor,
+            @RequestParam(defaultValue = "20") int limit) {
+        return accountService.getLedgerPage(id, cursor, limit);
     }
 }
