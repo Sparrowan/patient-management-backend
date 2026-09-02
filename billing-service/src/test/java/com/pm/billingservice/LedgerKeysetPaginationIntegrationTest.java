@@ -86,6 +86,47 @@ class LedgerKeysetPaginationIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
+    @DisplayName("an insert between pages doesn't shift the window — no duplicate or skip (keyset stability)")
+    void stableUnderConcurrentInsert() {
+        UUID account = openAccount();
+        for (int i = 0; i < 10; i++) {
+            credit(account, "1.00", "seed-" + i);
+        }
+
+        CursorPageView page1 = fetchPage(account, null, 5);
+        assertThat(page1.items()).hasSize(5);
+        assertThat(page1.hasMore()).isTrue();
+
+        // A new entry lands at the top (newest) between page 1 and page 2. With OFFSET 5 this would
+        // push everything down one and page 2 would repeat page 1's last row. Keyset seeks from a
+        // fixed position, so it's immune.
+        credit(account, "1.00", "inserted-after-page-1");
+
+        CursorPageView page2 = fetchPage(account, page1.nextCursor(), 5);
+
+        Set<UUID> firstIds = new HashSet<>(page1.items().stream().map(LedgerView::id).toList());
+        Set<UUID> secondIds = new HashSet<>(page2.items().stream().map(LedgerView::id).toList());
+        assertThat(secondIds).doesNotContainAnyElementsOf(firstIds); // no duplicate across the boundary
+        // The two pages together are exactly the original 10 — the late insert appears in neither
+        // (it's newer than the cursor, so it belongs "before" page 1, not in this backward scan).
+        Set<UUID> union = new HashSet<>(firstIds);
+        union.addAll(secondIds);
+        assertThat(union).hasSize(10);
+        assertThat(page2.hasMore()).isFalse();
+    }
+
+    @Test
+    @DisplayName("a malformed cursor returns 400, not 500")
+    void malformedCursorReturns400() {
+        UUID account = openAccount();
+
+        ResponseEntity<String> response = rest.getForEntity(
+                ACCOUNTS + "/" + account + "/ledger/keyset?cursor=not-a-real-cursor", String.class);
+
+        assertThat(response.getStatusCode().value()).isEqualTo(400);
+    }
+
+    @Test
     @DisplayName("a fresh account with no entries returns an empty final page")
     void emptyLedger() {
         UUID account = openAccount();

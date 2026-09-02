@@ -123,6 +123,7 @@ public class BillingAccountController {
             description = "Scalable pagination for a large history: pass no cursor for the first page, "
                     + "then echo nextCursor until hasMore is false. O(limit) at any depth; no total count.")
     @ApiResponse(responseCode = "200", description = "A page of entries, newest first")
+    @ApiResponse(responseCode = "400", description = "Malformed cursor")
     @ApiResponse(responseCode = "404", description = "No such account")
     @GetMapping("/{id}/ledger/keyset")
     public CursorPage<LedgerEntryResponseDTO> getLedgerPage(

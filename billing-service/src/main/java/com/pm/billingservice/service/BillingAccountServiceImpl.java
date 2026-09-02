@@ -8,6 +8,7 @@ import com.pm.billingservice.dto.OpenAccountRequestDTO;
 import com.pm.billingservice.dto.PagedResponse;
 import com.pm.billingservice.exception.AccountAlreadyExistsException;
 import com.pm.billingservice.exception.BillingAccountNotFoundException;
+import com.pm.billingservice.exception.InvalidCursorException;
 import com.pm.billingservice.mapper.BillingAccountMapper;
 import com.pm.billingservice.mapper.LedgerEntryMapper;
 import com.pm.billingservice.model.BillingAccount;
@@ -129,7 +130,12 @@ public class BillingAccountServiceImpl implements BillingAccountService {
     }
 
     private List<LedgerEntry> seekAfter(UUID accountId, String cursor, Limit fetch) {
-        Cursor position = CursorCodec.decode(cursor); // malformed → IllegalArgumentException (→ 400)
+        Cursor position;
+        try {
+            position = CursorCodec.decode(cursor);
+        } catch (IllegalArgumentException malformed) {
+            throw new InvalidCursorException(malformed); // → 400, not a 500
+        }
         return ledgerRepository.findPageAfter(accountId, position.createdAt(), position.id(), fetch);
     }
 

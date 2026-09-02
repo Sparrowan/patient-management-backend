@@ -122,7 +122,11 @@ cross-reference the backend-patterns catalog we're prioritizing for banking/fint
       any request → scale out by adding pods. *(The former blocker — the `@Scheduled OutboxRelay` —
       is now multi-instance-safe via `FOR UPDATE SKIP LOCKED`, so >1 patient-service replica is safe;
       see Event-driven.)*
-- [ ] **Keyset (cursor) pagination** for large history endpoints (offset is fine for now). `[#24]`
+- [x] **Keyset (cursor) pagination** — done on the billing ledger
+      (`GET /billing-accounts/{id}/ledger/keyset`): opaque cursor over a `(created_at, id)` total-order
+      key, `limit + 1` to derive `hasMore`/`nextCursor` with no COUNT, composite index (V10), O(limit)
+      + stable under concurrent inserts. Offset `/ledger` kept for admin/random access. Backport to
+      other large history endpoints as they appear. `[#24]`
 - [ ] **Read/write splitting** across replicas — most traffic is reads; route `@Transactional(readOnly=true)`
       to replicas via `AbstractRoutingDataSource`, or transparently with **ShardingSphere-JDBC**. `[#20]`
 - [ ] **Connection-pool tuning** (HikariCP) — pool size is a scale lever (and a footgun). The pool
