@@ -1,6 +1,7 @@
 package com.pm.billingservice.service;
 
 import com.pm.billingservice.dto.BillingAccountResponseDTO;
+import com.pm.billingservice.dto.CursorPage;
 import com.pm.billingservice.dto.LedgerEntryResponseDTO;
 import com.pm.billingservice.dto.MoneyMovementRequestDTO;
 import com.pm.billingservice.dto.OpenAccountRequestDTO;
@@ -12,11 +13,15 @@ import com.pm.billingservice.mapper.LedgerEntryMapper;
 import com.pm.billingservice.model.BillingAccount;
 import com.pm.billingservice.model.EntryType;
 import com.pm.billingservice.model.LedgerEntry;
+import com.pm.billingservice.pagination.Cursor;
+import com.pm.billingservice.pagination.CursorCodec;
 import com.pm.billingservice.repository.BillingAccountRepository;
 import com.pm.billingservice.repository.LedgerEntryRepository;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Limit;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -92,6 +97,47 @@ public class BillingAccountServiceImpl implements BillingAccountService {
         }
         return PagedResponse.from(
                 ledgerRepository.findByAccountId(accountId, pageable).map(ledgerMapper::toResponse));
+    }
+
+    /** Default and hard cap for keyset page size — a bounded page keeps each seek O(limit). */
+    private static final int DEFAULT_LIMIT = 20;
+    private static final int MAX_LIMIT = 100;
+
+    @Override
+    @Transactional(readOnly = true)
+    public CursorPage<LedgerEntryResponseDTO> getLedgerPage(UUID accountId, String cursor, int limit) {
+        if (!accountRepository.existsById(accountId)) {
+            throw new BillingAccountNotFoundException(accountId);
+        }
+        int pageSize = clampLimit(limit);
+
+        // Fetch one extra row: its presence tells us another page exists, without a COUNT.
+        Limit fetch = Limit.of(pageSize + 1);
+        List<LedgerEntry> rows = (cursor == null || cursor.isBlank())
+                ? ledgerRepository.findFirstPage(accountId, fetch)
+                : seekAfter(accountId, cursor, fetch);
+
+        boolean hasMore = rows.size() > pageSize;
+        List<LedgerEntry> page = hasMore ? rows.subList(0, pageSize) : rows;
+
+        String nextCursor = null;
+        if (hasMore) {
+            LedgerEntry last = page.get(page.size() - 1);
+            nextCursor = CursorCodec.encode(new Cursor(last.getCreatedAt(), last.getId()));
+        }
+        return CursorPage.of(page.stream().map(ledgerMapper::toResponse).toList(), nextCursor, hasMore);
+    }
+
+    private List<LedgerEntry> seekAfter(UUID accountId, String cursor, Limit fetch) {
+        Cursor position = CursorCodec.decode(cursor); // malformed → IllegalArgumentException (→ 400)
+        return ledgerRepository.findPageAfter(accountId, position.createdAt(), position.id(), fetch);
+    }
+
+    private int clampLimit(int limit) {
+        if (limit <= 0) {
+            return DEFAULT_LIMIT;
+        }
+        return Math.min(limit, MAX_LIMIT);
     }
 
     /**

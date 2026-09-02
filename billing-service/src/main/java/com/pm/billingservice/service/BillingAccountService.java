@@ -42,6 +42,15 @@ public interface BillingAccountService {
     PagedResponse<LedgerEntryResponseDTO> getLedger(UUID accountId, Pageable pageable);
 
     /**
+     * Keyset (cursor) pagination of the ledger, newest first — the scalable path for a large, growing
+     * history: O(limit) at any depth and stable under concurrent inserts, at the cost of no total
+     * count or random page access. Pass {@code cursor = null} for the first page, then echo
+     * {@link com.pm.billingservice.dto.CursorPage#nextCursor()} until {@code hasMore} is false.
+     */
+    com.pm.billingservice.dto.CursorPage<LedgerEntryResponseDTO> getLedgerPage(
+            UUID accountId, String cursor, int limit);
+
+    /**
      * Deactivates a patient's account, invoked by the synchronous deletion veto
      * ({@code CloseAccountForPatient} gRPC): closes it if empty, otherwise throws
      * {@link com.pm.billingservice.exception.AccountHasBalanceException} to veto the delete (a funded
