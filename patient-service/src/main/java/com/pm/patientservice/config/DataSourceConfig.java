@@ -1,6 +1,7 @@
 package com.pm.patientservice.config;
 
 import com.zaxxer.hikari.HikariDataSource;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.util.Map;
 import javax.sql.DataSource;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -81,9 +82,10 @@ public class DataSourceConfig {
     @Primary
     public DataSource dataSource(
             @Qualifier("primaryDataSource") DataSource primaryDataSource,
-            @Qualifier("replicaDataSource") DataSource replicaDataSource) {
+            @Qualifier("replicaDataSource") DataSource replicaDataSource,
+            MeterRegistry meterRegistry) {
 
-        RoutingDataSource routing = new RoutingDataSource();
+        RoutingDataSource routing = new RoutingDataSource(meterRegistry);
         routing.setTargetDataSources(Map.of(
                 RoutingDataSource.PRIMARY, primaryDataSource,
                 RoutingDataSource.REPLICA, replicaDataSource));
