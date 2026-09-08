@@ -425,6 +425,24 @@ compilation problems` / `No qualifying bean of type PatientMapper` at startup). 
       is no totals / no random page access — so the offset `/ledger` stays for admin/random access. The
       `cursor` is opaque (`CursorCodec`, base64 of `(instant, id)`); a malformed one → 400
       (`InvalidCursorException`). `CursorPage<T>` deliberately carries no total count.
+- [x] **Read/write splitting (patient-service)** — the read half of database scaling. A
+      `RoutingDataSource` routes `@Transactional(readOnly = true)` to a real MariaDB **read replica**
+      and everything else to the **primary**, behind a **`LazyConnectionDataSourceProxy`** — mandatory,
+      because Spring acquires the connection when the tx *begins*, before the read-only flag is set, so
+      without it the key always resolves to the default and every read silently hits the primary.
+      Flyway is pinned to the primary (`@FlywayDataSource`) — migrations are writes; the replica gets
+      schema through replication. The replica runs `--read-only=1`, so the split is enforced **by the
+      database**, not just by our code (an app write there fails with `ERROR 1290`). Replica seeding
+      follows the real procedure: `mariadb-dump --single-transaction --master-data=2` (consistent
+      snapshot stamped with exact binlog coordinates) → load → resume streaming from precisely that
+      position, which is what makes the copy→stream handoff gap-free and duplicate-free.
+      **Freshness is per-query, not per-system:** `ReadFreshness.fromPrimary(...)` (a `ThreadLocal`,
+      cleared in `finally` so it can't leak into a pooled thread's next request) pins reads that must
+      not be stale — used by the **cache fill**, since a replica read cached for the TTL turns
+      milliseconds of lag into ~10 minutes of staleness, and a stale `@Version` served as an ETag would
+      fail the client's next update with a spurious 409. `patient.datasource.routing{target}` makes it
+      observable — both failure modes here (missing `readOnly`, missing lazy proxy) are otherwise
+      *silent*. Verified live: 3 list reads → 3 replica routes; cache fill → primary; cache hit → no DB.
 - [x] **analytics-service — CQRS read side** (`:4003`, own `analytics_db`). No command API: its state
       is built by **projecting** `patient-events` (its own consumer group) into denormalized **read
       models**, served by read-only query endpoints (`/api/v1/analytics/{registrations,summary,active}`,

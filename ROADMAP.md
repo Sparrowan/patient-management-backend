@@ -127,8 +127,18 @@ cross-reference the backend-patterns catalog we're prioritizing for banking/fint
       key, `limit + 1` to derive `hasMore`/`nextCursor` with no COUNT, composite index (V10), O(limit)
       + stable under concurrent inserts. Offset `/ledger` kept for admin/random access. Backport to
       other large history endpoints as they appear. `[#24]`
-- [ ] **Read/write splitting** across replicas — most traffic is reads; route `@Transactional(readOnly=true)`
-      to replicas via `AbstractRoutingDataSource`, or transparently with **ShardingSphere-JDBC**. `[#20]`
+- [x] **Read/write splitting** across replicas — done in `patient-service`: a `RoutingDataSource`
+      (`AbstractRoutingDataSource`) sends `@Transactional(readOnly=true)` to a real MariaDB replica and
+      everything else to the primary, behind a `LazyConnectionDataSourceProxy` (mandatory — the
+      connection is otherwise acquired before the read-only flag is set, so every read silently lands
+      on the primary). Flyway is pinned to the primary; the replica runs `--read-only=1` so the app
+      user physically cannot write to it. `ReadFreshness.fromPrimary(...)` is the per-query escape
+      hatch for reads that must not be stale (the cache fill uses it — otherwise ms of replica lag
+      freeze into minutes of stale cache, and a stale `@Version` becomes a spurious 409).
+      `patient.datasource.routing{target}` makes the split observable. Replica seeding uses the real
+      procedure: `mariadb-dump --single-transaction --master-data=2` then resume from those exact
+      binlog coordinates. Verified live (3 list reads → 3 replica routes; cache fill → primary; cache
+      hit → no DB). Transparent alternative if this grows: **ShardingSphere-JDBC**. `[#20]`
 - [ ] **Connection-pool tuning** (HikariCP) — pool size is a scale lever (and a footgun). The pool
       is the *cure* for "too many connections" (it caps + reuses), not the cause. Watch the math:
       `replicas × pool_max_size < max_connections − headroom(~10)`. Today: default pool 10 vs MariaDB
