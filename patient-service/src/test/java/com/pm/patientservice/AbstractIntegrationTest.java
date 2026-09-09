@@ -79,5 +79,8 @@ public abstract class AbstractIntegrationTest {
         // which wouldn't evict a cache, so a live Redis would serve stale entries. Cache-aside behavior
         // is verified live in Docker instead. NONE swaps in a no-op CacheManager.
         registry.add("spring.cache.type", () -> "none");
+        // Turn off the outbox retention tick so it can't prune rows a test just set up; the retention
+        // test drives the worker directly.
+        registry.add("outbox.retention.enabled", () -> "false");
     }
 }
