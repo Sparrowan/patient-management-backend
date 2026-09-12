@@ -155,9 +155,20 @@ cross-reference the backend-patterns catalog we're prioritizing for banking/fint
 - [ ] **Caching** (Redis) — cache-aside for read-heavy endpoints + the id→display-name resolution.
       **PHI is not cached casually** (a Redis of names/DOBs is another PHI store — encrypt + TTL, or
       cache only ids/non-PHI). `[#38]`
-- [ ] **Table partitioning** — range-partition append-only/time-series tables (`ledger_entries`,
-      `outbox_events`) by month so old data is pruned/archived cheaply and hot queries scan less.
-      Comes *before* sharding (single DB, no app changes).
+- [~] **Table partitioning** — **evaluated and rejected for `ledger_entries`; use archival instead.**
+      Tested against MariaDB rather than assumed, and it hits three walls in order: (1) InnoDB
+      **foreign keys are incompatible with partitioning** (`ERROR 1217`) — `fk_ledger_account` would
+      have to go, losing DB-enforced referential integrity on a money table; (2) **every unique key
+      must contain the partition column** (`ERROR 1503`), forcing `PRIMARY KEY (id, created_at)` and
+      `UNIQUE (idempotency_key, created_at)`; and (3) that last change **silently destroys
+      idempotency** — uniqueness becomes per-partition, and the same `idempotency_key` inserts twice
+      in two partitions. Verified: two rows, same key, one in August and one in September. A
+      double-payment bug introduced by a performance optimisation is not a trade we make.
+      **Rule of thumb:** partition tables whose partition key is naturally part of every query *and*
+      every uniqueness rule (metrics, logs, time-series); never where a **global** constraint must
+      hold. `outbox_events` needs none of this — it's prunable, and **retention beats partitioning
+      whenever you're allowed to delete**. For the ledger (legally undeletable) the lever is
+      **hot/cold archival** with constraints preserved in each table. Comes *before* sharding.
 - [ ] **Horizontal sharding** — the last DB lever. **Trigger is write-throughput-beyond-one-primary
       or hot-set-beyond-RAM, *not* row count** — a single indexed InnoDB node handles 100M–1B rows
       fine (an indexed lookup is ~3–5 page reads at 1M *or* 1B; row count barely moves it). Reads
