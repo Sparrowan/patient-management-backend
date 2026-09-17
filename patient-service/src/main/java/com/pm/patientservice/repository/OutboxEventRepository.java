@@ -1,11 +1,14 @@
 package com.pm.patientservice.repository;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.pm.patientservice.model.OutboxEvent;
 
@@ -33,4 +36,26 @@ public interface OutboxEventRepository extends JpaRepository<OutboxEvent, UUID> 
     @Query(value = "SELECT * FROM outbox_events WHERE published_at IS NULL "
             + "ORDER BY created_at ASC LIMIT :limit FOR UPDATE SKIP LOCKED", nativeQuery = true)
     List<OutboxEvent> lockUnpublishedBatch(@Param("limit") int limit);
+
+    /**
+     * Deletes one bounded batch of already-published rows older than {@code cutoff}, oldest first.
+     *
+     * <p><b>Only published rows.</b> {@code published_at IS NOT NULL} is the safety predicate — an
+     * unpublished row is still pending work, and deleting it would silently drop an event.
+     *
+     * <p><b>Deliberately batched, not one big DELETE.</b> A single unbounded delete would hold row
+     * locks for its whole duration, balloon the undo log, and — now that a replica exists — produce
+     * one enormous binlog transaction the replica must replay before it can apply anything else,
+     * spiking replication lag. Small batches keep locks short and replication smooth.
+     *
+     * <p>Native because MariaDB's {@code DELETE ... ORDER BY ... LIMIT} has no JPQL equivalent. The
+     * predicate seeks on the leading column of {@code idx_outbox_unpublished (published_at, ...)}, so
+     * it's a range scan rather than a table scan. {@code @Transactional} sits here so each batch
+     * commits on its own.
+     */
+    @Modifying
+    @Transactional
+    @Query(value = "DELETE FROM outbox_events WHERE published_at IS NOT NULL AND published_at < :cutoff "
+            + "ORDER BY published_at ASC LIMIT :limit", nativeQuery = true)
+    int deletePublishedBefore(@Param("cutoff") Instant cutoff, @Param("limit") int limit);
 }

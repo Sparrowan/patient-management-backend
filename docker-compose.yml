@@ -89,6 +89,9 @@ services:
   patient-service-db:
     image: mariadb:11.7
     container_name: patient-service-db
+    # server-id + binlog make this a replication PRIMARY. The binlog is the ordered log of committed
+    # changes the replica replays to stay in sync (the same log CDC/Debezium would tail).
+    command: ["--server-id=1", "--log-bin=mysql-bin", "--binlog-format=ROW"]
     environment:
       MARIADB_DATABASE: patient_db
       MARIADB_USER: patient
@@ -105,6 +108,78 @@ services:
     networks:
       - patient-net
 
+  # A read REPLICA of patient-service-db. read-only=1 means the application user physically cannot
+  # write here — the split is enforced by the database, not just by our routing code. Replication
+  # threads bypass read_only, so replayed changes still apply.
+  patient-service-db-replica:
+    image: mariadb:11.7
+    container_name: patient-service-db-replica
+    command: ["--server-id=2", "--read-only=1", "--log-bin=mysql-bin", "--binlog-format=ROW"]
+    environment:
+      # The database and app user are created locally; the DATA arrives via replication.
+      MARIADB_DATABASE: patient_db
+      MARIADB_USER: patient
+      MARIADB_PASSWORD: patient
+      MARIADB_ROOT_PASSWORD: root
+    volumes:
+      - patient-db-replica-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - patient-net
+
+  # One-shot: creates the replication account on the primary, reads its current binlog coordinates,
+  # and points the replica at them. Done dynamically (not as a static init script) because the
+  # coordinates aren't known until the primary is running. Everything written afterwards — including
+  # Flyway's migrations — flows to the replica from this point on.
+  patient-db-replica-init:
+    image: mariadb:11.7
+    container_name: patient-db-replica-init
+    depends_on:
+      patient-service-db:
+        condition: service_healthy
+      patient-service-db-replica:
+        condition: service_healthy
+    entrypoint:
+      - bash
+      - -c
+      - |
+        set -e
+        # Already replicating? Then this is a restart — nothing to do.
+        if mariadb -h patient-service-db-replica -uroot -proot -e "SHOW SLAVE STATUS\G" | grep -q "Slave_IO_Running: Yes"; then
+          echo "Replica already running; nothing to do."; exit 0
+        fi
+        # 1. Replication account on the primary.
+        mariadb -h patient-service-db -uroot -proot -e "
+          CREATE USER IF NOT EXISTS 'repl'@'%' IDENTIFIED BY 'repl';
+          GRANT REPLICATION SLAVE ON *.* TO 'repl'@'%';
+          FLUSH PRIVILEGES;"
+        # 2. Consistent snapshot of the primary. --single-transaction avoids locking writers;
+        #    --master-data=2 records the exact binlog position the snapshot corresponds to, so the
+        #    replica can resume from precisely there with no gap and no double-apply.
+        mariadb-dump -h patient-service-db -uroot -proot \
+          --single-transaction --master-data=2 --databases patient_db > /tmp/dump.sql
+        CM=$$(grep -m1 '^-- CHANGE MASTER TO' /tmp/dump.sql)
+        FILE=$$(echo "$$CM" | sed -E "s/.*MASTER_LOG_FILE='([^']+)'.*/\1/")
+        POS=$$(echo "$$CM" | sed -E "s/.*MASTER_LOG_POS=([0-9]+).*/\1/")
+        echo "Snapshot taken at $$FILE:$$POS"
+        # 3. Load the snapshot into the replica (root bypasses read_only).
+        mariadb -h patient-service-db-replica -uroot -proot < /tmp/dump.sql
+        # 4. Start replicating from the snapshot's position onward.
+        mariadb -h patient-service-db-replica -uroot -proot -e "
+          STOP SLAVE;
+          CHANGE MASTER TO MASTER_HOST='patient-service-db', MASTER_PORT=3306,
+            MASTER_USER='repl', MASTER_PASSWORD='repl',
+            MASTER_LOG_FILE='$$FILE', MASTER_LOG_POS=$$POS;
+          START SLAVE;"
+        echo "Replication started from $$FILE:$$POS"
+    networks:
+      - patient-net
+
   patient-service:
     build:
       context: ./patient-service
@@ -113,6 +188,9 @@ services:
     depends_on:
       patient-service-db:
         condition: service_healthy
+      # Wait until replication is actually wired, so Flyway's migrations replicate to the replica.
+      patient-db-replica-init:
+        condition: service_completed_successfully
       kafka:
         condition: service_healthy
       schema-registry:
@@ -128,6 +206,10 @@ services:
       DB_URL: jdbc:mariadb://patient-service-db:3306/patient_db
       DB_USERNAME: patient
       DB_PASSWORD: patient
+      # Read-only transactions are routed here instead of the primary (see DataSourceConfig).
+      REPLICA_DB_URL: jdbc:mariadb://patient-service-db-replica:3306/patient_db
+      REPLICA_DB_USERNAME: patient
+      REPLICA_DB_PASSWORD: patient
       # Redis for cache-aside on GET /{id} (shared with the gateway's rate limiter).
       REDIS_HOST: redis
       # Non-dev profile: base config, no SQL logging.
@@ -365,6 +447,7 @@ services:
 
 volumes:
   patient-db-data:
+  patient-db-replica-data:
   billing-db-data:
   auth-db-data:
   analytics-db-data:

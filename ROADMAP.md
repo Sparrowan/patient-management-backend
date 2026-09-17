@@ -127,8 +127,18 @@ cross-reference the backend-patterns catalog we're prioritizing for banking/fint
       key, `limit + 1` to derive `hasMore`/`nextCursor` with no COUNT, composite index (V10), O(limit)
       + stable under concurrent inserts. Offset `/ledger` kept for admin/random access. Backport to
       other large history endpoints as they appear. `[#24]`
-- [ ] **Read/write splitting** across replicas — most traffic is reads; route `@Transactional(readOnly=true)`
-      to replicas via `AbstractRoutingDataSource`, or transparently with **ShardingSphere-JDBC**. `[#20]`
+- [x] **Read/write splitting** across replicas — done in `patient-service`: a `RoutingDataSource`
+      (`AbstractRoutingDataSource`) sends `@Transactional(readOnly=true)` to a real MariaDB replica and
+      everything else to the primary, behind a `LazyConnectionDataSourceProxy` (mandatory — the
+      connection is otherwise acquired before the read-only flag is set, so every read silently lands
+      on the primary). Flyway is pinned to the primary; the replica runs `--read-only=1` so the app
+      user physically cannot write to it. `ReadFreshness.fromPrimary(...)` is the per-query escape
+      hatch for reads that must not be stale (the cache fill uses it — otherwise ms of replica lag
+      freeze into minutes of stale cache, and a stale `@Version` becomes a spurious 409).
+      `patient.datasource.routing{target}` makes the split observable. Replica seeding uses the real
+      procedure: `mariadb-dump --single-transaction --master-data=2` then resume from those exact
+      binlog coordinates. Verified live (3 list reads → 3 replica routes; cache fill → primary; cache
+      hit → no DB). Transparent alternative if this grows: **ShardingSphere-JDBC**. `[#20]`
 - [ ] **Connection-pool tuning** (HikariCP) — pool size is a scale lever (and a footgun). The pool
       is the *cure* for "too many connections" (it caps + reuses), not the cause. Watch the math:
       `replicas × pool_max_size < max_connections − headroom(~10)`. Today: default pool 10 vs MariaDB
@@ -145,9 +155,22 @@ cross-reference the backend-patterns catalog we're prioritizing for banking/fint
 - [ ] **Caching** (Redis) — cache-aside for read-heavy endpoints + the id→display-name resolution.
       **PHI is not cached casually** (a Redis of names/DOBs is another PHI store — encrypt + TTL, or
       cache only ids/non-PHI). `[#38]`
-- [ ] **Table partitioning** — range-partition append-only/time-series tables (`ledger_entries`,
-      `outbox_events`) by month so old data is pruned/archived cheaply and hot queries scan less.
-      Comes *before* sharding (single DB, no app changes).
+- [~] **Table partitioning** — **evaluated and rejected for `ledger_entries`; use archival instead.**
+      Tested against MariaDB rather than assumed, and it hits three walls in order: (1) InnoDB
+      **foreign keys are incompatible with partitioning** (`ERROR 1217`) — `fk_ledger_account` would
+      have to go, losing DB-enforced referential integrity on a money table; (2) **every unique key
+      must contain the partition column** (`ERROR 1503`), forcing `PRIMARY KEY (id, created_at)` and
+      `UNIQUE (idempotency_key, created_at)`; and (3) that last change **silently destroys
+      idempotency** — uniqueness becomes per-partition, and the same `idempotency_key` inserts twice
+      in two partitions. Verified: two rows, same key, one in August and one in September. A
+      double-payment bug introduced by a performance optimisation is not a trade we make.
+      **Rule of thumb:** partition tables whose partition key is naturally part of every query *and*
+      every uniqueness rule (metrics, logs, time-series); never where a **global** constraint must
+      hold. `outbox_events` needs none of this — it's prunable, and **retention beats partitioning
+      whenever you're allowed to delete**. For the ledger (legally undeletable) the lever is
+      **hot/cold archival** — now **built** (see CLAUDE.md): a second table with both constraints
+      intact on each half, the honest price being that global uniqueness is no longer one constraint,
+      so every lookup reads both halves, hot first. Comes *before* sharding.
 - [ ] **Horizontal sharding** — the last DB lever. **Trigger is write-throughput-beyond-one-primary
       or hot-set-beyond-RAM, *not* row count** — a single indexed InnoDB node handles 100M–1B rows
       fine (an indexed lookup is ~3–5 page reads at 1M *or* 1B; row count barely moves it). Reads
@@ -304,7 +327,11 @@ Pull in this order (each step buys headroom; only advance when metrics say so):
 4. **Cache** (Redis) + **CDN/edge** — take read load off the DB and origin entirely.
 5. **Stateless horizontal scale** — more service replicas behind an LB + HPA. *(Foundation already
    in place; unblock by making the outbox relay multi-instance-safe first.)*
-6. **Table partitioning** — prune/archive time-series tables (ledger, outbox) within one DB.
+6. **Data lifecycle within one DB** — shrink the *hot working set*, not the data. Prune what you may
+   delete (outbox retention), archive what you may not (the ledger's hot/cold split). Note this is a
+   cost-and-operations lever far more than a latency one: an indexed lookup barely notices row count,
+   but buffer-pool residency, backup/restore time and `ALTER TABLE` all do. Partitioning is the
+   textbook answer here and was **rejected** for the ledger — see Data & scale.
 7. **Horizontal sharding** — split the data tier by key (ShardingSphere/Vitess). Last, most-invasive;
    most systems never reach it because 1–6 suffice.
 

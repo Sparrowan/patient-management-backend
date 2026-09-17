@@ -2,6 +2,7 @@ package com.pm.patientservice.service;
 
 import com.pm.patientservice.cache.RedisDistributedLock;
 import com.pm.patientservice.config.CacheConfig;
+import com.pm.patientservice.config.ReadFreshness;
 import com.pm.patientservice.dto.PatientResponseDTO;
 import com.pm.patientservice.mapper.PatientMapper;
 import com.pm.patientservice.repository.PatientRepository;
@@ -103,7 +104,14 @@ public class PatientCacheReader {
         // and is negatively cached — correct, it's "not found". The repository read runs in its own
         // read-only transaction (Spring Data default), so a cache hit opens no transaction at all and
         // the mapper only touches eager scalar fields (no lazy state after the tx closes).
-        return patientRepository.findById(id).map(patientMapper::toResponse);
+        //
+        // Pinned to the PRIMARY on purpose. That read-only transaction would otherwise route to a
+        // replica, and whatever it returns is then cached for the entry TTL — so a few milliseconds of
+        // replication lag would be frozen into ~10 minutes of stale cache, and a stale @Version would
+        // hand clients an ETag that fails their next update with a spurious 409. A cache fill is read
+        // once and served many times, so it's exactly the read worth paying primary latency for.
+        return ReadFreshness.fromPrimary(
+                () -> patientRepository.findById(id).map(patientMapper::toResponse));
     }
 
     /** Poll the cache until the winner populates it or the budget elapses; returns the wrapper or null. */
