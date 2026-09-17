@@ -168,7 +168,9 @@ cross-reference the backend-patterns catalog we're prioritizing for banking/fint
       every uniqueness rule (metrics, logs, time-series); never where a **global** constraint must
       hold. `outbox_events` needs none of this — it's prunable, and **retention beats partitioning
       whenever you're allowed to delete**. For the ledger (legally undeletable) the lever is
-      **hot/cold archival** with constraints preserved in each table. Comes *before* sharding.
+      **hot/cold archival** — now **built** (see CLAUDE.md): a second table with both constraints
+      intact on each half, the honest price being that global uniqueness is no longer one constraint,
+      so every lookup reads both halves, hot first. Comes *before* sharding.
 - [ ] **Horizontal sharding** — the last DB lever. **Trigger is write-throughput-beyond-one-primary
       or hot-set-beyond-RAM, *not* row count** — a single indexed InnoDB node handles 100M–1B rows
       fine (an indexed lookup is ~3–5 page reads at 1M *or* 1B; row count barely moves it). Reads
@@ -325,7 +327,11 @@ Pull in this order (each step buys headroom; only advance when metrics say so):
 4. **Cache** (Redis) + **CDN/edge** — take read load off the DB and origin entirely.
 5. **Stateless horizontal scale** — more service replicas behind an LB + HPA. *(Foundation already
    in place; unblock by making the outbox relay multi-instance-safe first.)*
-6. **Table partitioning** — prune/archive time-series tables (ledger, outbox) within one DB.
+6. **Data lifecycle within one DB** — shrink the *hot working set*, not the data. Prune what you may
+   delete (outbox retention), archive what you may not (the ledger's hot/cold split). Note this is a
+   cost-and-operations lever far more than a latency one: an indexed lookup barely notices row count,
+   but buffer-pool residency, backup/restore time and `ALTER TABLE` all do. Partitioning is the
+   textbook answer here and was **rejected** for the ledger — see Data & scale.
 7. **Horizontal sharding** — split the data tier by key (ShardingSphere/Vitess). Last, most-invasive;
    most systems never reach it because 1–6 suffice.
 
