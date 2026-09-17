@@ -2,12 +2,14 @@ package com.pm.billingservice.ledger;
 
 import com.pm.billingservice.exception.UnsupportedLedgerSortException;
 import com.pm.billingservice.model.LedgerRecord;
+import com.pm.billingservice.pagination.Cursor;
 import com.pm.billingservice.repository.ArchivedLedgerEntryRepository;
 import com.pm.billingservice.repository.LedgerEntryRepository;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Limit;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
@@ -62,6 +64,40 @@ public class LedgerHistoryReader {
         }
 
         return new PageImpl<>(content, pageable, total);
+    }
+
+    /**
+     * One keyset page, newest first, spanning both halves.
+     *
+     * <p>Simpler than the offset read above, and that is the point: no counts, no seam arithmetic.
+     * <b>The same cursor is valid against both tables unchanged</b>, because every archived row is
+     * older than every hot row — so "everything older than this position" in the archive is always
+     * the correct continuation, whether the cursor currently sits in the hot half or has already
+     * crossed into the cold one. Once it has crossed, the hot query returns nothing on its own (all
+     * hot rows are <em>newer</em> than the cursor, so the predicate excludes them), and the read
+     * falls through to the archive with no special case to write.
+     *
+     * @param position where to resume, or {@code null} for the first page
+     * @param fetchSize rows to fetch, normally {@code limit + 1} so the caller can detect a further
+     *     page without a COUNT
+     */
+    public List<LedgerRecord> readKeyset(UUID accountId, Cursor position, int fetchSize) {
+        List<LedgerRecord> rows = new ArrayList<>(fetchSize);
+        Limit fetch = Limit.of(fetchSize);
+
+        rows.addAll(position == null
+                ? ledgerRepository.findFirstPage(accountId, fetch)
+                : ledgerRepository.findPageAfter(accountId, position.createdAt(), position.id(), fetch));
+
+        int remaining = fetchSize - rows.size();
+        if (remaining > 0) {
+            Limit topUp = Limit.of(remaining);
+            rows.addAll(position == null
+                    ? archiveRepository.findFirstPage(accountId, topUp)
+                    : archiveRepository.findPageAfter(
+                            accountId, position.createdAt(), position.id(), topUp));
+        }
+        return rows;
     }
 
     /**

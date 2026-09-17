@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.pm.billingservice.AbstractIntegrationTest;
 import com.pm.billingservice.model.LedgerRecord;
+import com.pm.billingservice.pagination.Cursor;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
@@ -207,6 +208,36 @@ class LedgerArchiveIntegrationTest extends AbstractIntegrationTest {
         assertThat(page.getTotalElements()).isEqualTo(3);
         assertThat(page.getContent().stream().map(LedgerRecord::getIdempotencyKey))
                 .containsExactly("k-3", "k-2", "k-1");
+    }
+
+    @Test
+    @DisplayName("a keyset cursor walks through the seam into the archive, not into it and stop")
+    void keysetCursorCrossesTheSeam() {
+        // Two hot, three archived. Paging two at a time must yield all five in order, which means
+        // the cursor has to survive the crossing and then keep working inside the archive.
+        insertEntry("k-a1", aged(RETENTION_MONTHS * 30 + 30), null);
+        insertEntry("k-a2", aged(RETENTION_MONTHS * 30 + 20), null);
+        insertEntry("k-a3", aged(RETENTION_MONTHS * 30 + 10), null);
+        insertEntry("k-h1", aged(4), null);
+        insertEntry("k-h2", aged(2), null);
+        worker.archiveExpired();
+        assertThat(idsIn("ledger_entries_archive")).hasSize(3);
+
+        List<String> walked = new java.util.ArrayList<>();
+        Cursor position = null;
+        for (int page = 0; page < 5; page++) {
+            List<LedgerRecord> rows = history.readKeyset(accountId, position, 3); // limit 2 + 1
+            boolean hasMore = rows.size() > 2;
+            List<LedgerRecord> content = hasMore ? rows.subList(0, 2) : rows;
+            content.forEach(r -> walked.add(r.getIdempotencyKey()));
+            if (!hasMore) {
+                break;
+            }
+            LedgerRecord last = content.get(content.size() - 1);
+            position = new Cursor(last.getCreatedAt(), last.getId());
+        }
+
+        assertThat(walked).containsExactly("k-h2", "k-h1", "k-a3", "k-a2", "k-a1");
     }
 
     @Test

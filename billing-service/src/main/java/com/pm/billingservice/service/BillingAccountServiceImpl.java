@@ -117,31 +117,31 @@ public class BillingAccountServiceImpl implements BillingAccountService {
         }
         int pageSize = clampLimit(limit);
 
-        // Fetch one extra row: its presence tells us another page exists, without a COUNT.
-        Limit fetch = Limit.of(pageSize + 1);
-        List<LedgerEntry> rows = (cursor == null || cursor.isBlank())
-                ? ledgerRepository.findFirstPage(accountId, fetch)
-                : seekAfter(accountId, cursor, fetch);
+        // Fetch one extra row: its presence tells us another page exists, without a COUNT. The read
+        // spans both halves of the ledger — a cursor that walks past the seam must keep going into
+        // the archive, not stop there.
+        List<LedgerRecord> rows = ledgerHistory.readKeyset(accountId, decodeCursor(cursor), pageSize + 1);
 
         boolean hasMore = rows.size() > pageSize;
-        List<LedgerEntry> page = hasMore ? rows.subList(0, pageSize) : rows;
+        List<LedgerRecord> page = hasMore ? rows.subList(0, pageSize) : rows;
 
         String nextCursor = null;
         if (hasMore) {
-            LedgerEntry last = page.get(page.size() - 1);
+            LedgerRecord last = page.get(page.size() - 1);
             nextCursor = CursorCodec.encode(new Cursor(last.getCreatedAt(), last.getId()));
         }
         return CursorPage.of(page.stream().map(ledgerMapper::toResponse).toList(), nextCursor, hasMore);
     }
 
-    private List<LedgerEntry> seekAfter(UUID accountId, String cursor, Limit fetch) {
-        Cursor position;
+    private Cursor decodeCursor(String cursor) {
+        if (cursor == null || cursor.isBlank()) {
+            return null;
+        }
         try {
-            position = CursorCodec.decode(cursor);
+            return CursorCodec.decode(cursor);
         } catch (IllegalArgumentException malformed) {
             throw new InvalidCursorException(malformed); // → 400, not a 500
         }
-        return ledgerRepository.findPageAfter(accountId, position.createdAt(), position.id(), fetch);
     }
 
     private int clampLimit(int limit) {

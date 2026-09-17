@@ -1,9 +1,11 @@
 package com.pm.billingservice.repository;
 
 import com.pm.billingservice.model.ArchivedLedgerEntry;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.data.domain.Limit;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.Query;
@@ -35,4 +37,29 @@ public interface ArchivedLedgerEntryRepository extends Repository<ArchivedLedger
             + "ORDER BY created_at DESC, id DESC LIMIT :limit OFFSET :offset", nativeQuery = true)
     List<ArchivedLedgerEntry> findSlice(
             @Param("accountId") UUID accountId, @Param("limit") int limit, @Param("offset") long offset);
+
+    /**
+     * Keyset entry point into the cold half — reached when a page begins in the hot table and runs
+     * off its end. Backed by {@code idx_ledger_archive_account}, which mirrors the hot table's
+     * {@code idx_ledger_account_created_id} so the seek costs the same on either side of the seam.
+     */
+    @Query("""
+            select a from ArchivedLedgerEntry a
+            where a.accountId = :accountId
+            order by a.createdAt desc, a.id desc
+            """)
+    List<ArchivedLedgerEntry> findFirstPage(@Param("accountId") UUID accountId, Limit limit);
+
+    /** Cold-half counterpart of {@code LedgerEntryRepository.findPageAfter}, identical tuple compare. */
+    @Query("""
+            select a from ArchivedLedgerEntry a
+            where a.accountId = :accountId
+              and (a.createdAt < :ts or (a.createdAt = :ts and a.id < :id))
+            order by a.createdAt desc, a.id desc
+            """)
+    List<ArchivedLedgerEntry> findPageAfter(
+            @Param("accountId") UUID accountId,
+            @Param("ts") Instant ts,
+            @Param("id") UUID id,
+            Limit limit);
 }
