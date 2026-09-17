@@ -439,6 +439,30 @@ compilation problems` / `No qualifying bean of type PatientMapper` at startup). 
       source of truth; a newly-added projection backfills by replay). Observability matches Tier 2
       (Prometheus incl. a `analytics.events.projected` counter + Kafka consumer lag; tracing continues
       the producer's traceparent into the projection; ECS JSON logs in the docker profile).
+- [x] **Ledger hot/cold archival (billing)** — the data-lifecycle lever for a table that may never be
+      deleted from. Entries older than a configurable window (`ledger.archive.retention-months`,
+      default **13** — so "same month last year" stays hot) move to `ledger_entries_archive`; the row
+      is **relocated, never deleted**, keeping its id, audit columns, FK and unique key. Chosen over
+      **partitioning**, which MariaDB makes unsafe here: a partitioned table can keep no FK (1217) and
+      forces every unique key to contain the partition column (1503), turning `UNIQUE
+      (idempotency_key)` into *per-partition* uniqueness — a double-payment hole. The honest cost of
+      two tables: **global uniqueness stops being one constraint**, so the DB no longer backstops
+      idempotency by itself and `LedgerEntryLookup` reads **hot first, then archive** — an order that
+      is the correctness argument, not style (rows move one way only, so a miss on hot means the
+      archive insert is already committed; the reverse order has a real double-apply window). Reads
+      span the seam: `LedgerHistoryReader` **concatenates** rather than merges, because the archiver
+      moves strictly **oldest-first**, keeping the two tables time-disjoint — which also forces the
+      history endpoint to narrow to time ordering (any other sort → **400**, since sorting across the
+      seam means reading both halves in full). The move is `INSERT ... SELECT` + `DELETE` sharing one
+      `WHERE/ORDER BY/LIMIT` **in one transaction** (sound only because the ledger is append-only), by
+      SQL and never JPA — a JPA insert would re-stamp `created_at`/`created_by` with the time of the
+      *move* and destroy the audit trail. **No `SKIP LOCKED`** here, unlike the outbox relay and payout
+      worker: those want disjoint batches, this one must not (a hole mid-history would break the
+      concatenation), so deterministic oldest-first selection makes racing instances contend on the
+      identical batch and the loser roll back wholly. An entry attached to a `PENDING`/parked `FAILED`
+      payout **halts** the cutoff rather than being skipped past — self-healing, and it keeps the
+      prefix intact. Safe because `BillingAccount.balance` is a **materialized** column: had it been a
+      `SUM()` over the ledger, archiving would silently move money.
 - [ ] Next: CDC (Debezium); a **reconciliation job** (register→delete orphan, `FAILED`/ambiguous
       payouts via a rail status-query, closed-account-mid-reversal edge). Background writes with no
       originating user (schedulers) still audit `"system"`.

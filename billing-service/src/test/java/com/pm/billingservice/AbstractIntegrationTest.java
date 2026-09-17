@@ -69,5 +69,7 @@ public abstract class AbstractIntegrationTest {
         registry.add("payout.saga.enabled", () -> "false");
         // Likewise the idempotency TTL sweep — the retention worker test drives it directly.
         registry.add("idempotency.retention.enabled", () -> "false");
+        // And the ledger archive sweep: a tick mid-test would move rows out from under a fixture.
+        registry.add("ledger.archive.enabled", () -> "false");
     }
 }
