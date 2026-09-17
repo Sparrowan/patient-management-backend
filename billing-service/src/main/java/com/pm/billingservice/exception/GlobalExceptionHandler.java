@@ -111,6 +111,13 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         return problem;
     }
 
+    @ExceptionHandler(UnsupportedLedgerSortException.class)
+    public ProblemDetail handleUnsupportedLedgerSort(UnsupportedLedgerSortException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
+        problem.setTitle("Unsupported sort");
+        return problem;
+    }
+
     @ExceptionHandler(PropertyReferenceException.class)
     public ProblemDetail handleInvalidSort(PropertyReferenceException ex) {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(

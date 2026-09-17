@@ -16,12 +16,15 @@ import com.pm.billingservice.exception.AccountAlreadyExistsException;
 import com.pm.billingservice.exception.AccountHasBalanceException;
 import com.pm.billingservice.exception.BillingAccountNotFoundException;
 import com.pm.billingservice.exception.InsufficientFundsException;
+import com.pm.billingservice.ledger.LedgerEntryLookup;
+import com.pm.billingservice.ledger.LedgerHistoryReader;
 import com.pm.billingservice.mapper.BillingAccountMapper;
 import com.pm.billingservice.mapper.LedgerEntryMapper;
 import com.pm.billingservice.model.AccountStatus;
 import com.pm.billingservice.model.BillingAccount;
 import com.pm.billingservice.model.EntryType;
 import com.pm.billingservice.model.LedgerEntry;
+import com.pm.billingservice.model.LedgerRecord;
 import com.pm.billingservice.repository.BillingAccountRepository;
 import com.pm.billingservice.repository.LedgerEntryRepository;
 import java.math.BigDecimal;
@@ -53,6 +56,8 @@ class BillingAccountServiceImplTest {
 
     @Mock private BillingAccountRepository accountRepository;
     @Mock private LedgerEntryRepository ledgerRepository;
+    @Mock private LedgerEntryLookup ledgerLookup;
+    @Mock private LedgerHistoryReader ledgerHistory;
     @Mock private BillingAccountMapper accountMapper;
     @Mock private LedgerEntryMapper ledgerMapper;
     @InjectMocks private BillingAccountServiceImpl service;
@@ -148,10 +153,10 @@ class BillingAccountServiceImplTest {
         @DisplayName("credit applies to the balance and records a ledger entry")
         void creditApplies() {
             BillingAccount account = account();
-            when(ledgerRepository.findByIdempotencyKey("k1")).thenReturn(Optional.empty());
+            when(ledgerLookup.findByIdempotencyKey("k1")).thenReturn(Optional.empty());
             when(accountRepository.findByIdForUpdate(ACCOUNT_ID)).thenReturn(Optional.of(account));
             when(ledgerRepository.save(any(LedgerEntry.class))).thenAnswer(inv -> inv.getArgument(0));
-            when(ledgerMapper.toResponse(any(LedgerEntry.class))).thenReturn(ledgerResponse());
+            when(ledgerMapper.toResponse(any(LedgerRecord.class))).thenReturn(ledgerResponse());
 
             service.credit(ACCOUNT_ID, new MoneyMovementRequestDTO(new BigDecimal("50.00"), "topup"), "k1");
 
@@ -163,8 +168,8 @@ class BillingAccountServiceImplTest {
         @Test
         @DisplayName("credit is idempotent: a seen key replays without re-applying")
         void creditIsIdempotent() {
-            when(ledgerRepository.findByIdempotencyKey("k1")).thenReturn(Optional.of(ledgerEntry("k1")));
-            when(ledgerMapper.toResponse(any(LedgerEntry.class))).thenReturn(ledgerResponse());
+            when(ledgerLookup.findByIdempotencyKey("k1")).thenReturn(Optional.of(ledgerEntry("k1")));
+            when(ledgerMapper.toResponse(any(LedgerRecord.class))).thenReturn(ledgerResponse());
 
             LedgerEntryResponseDTO result =
                     service.credit(ACCOUNT_ID, new MoneyMovementRequestDTO(new BigDecimal("50.00"), null), "k1");
@@ -180,10 +185,10 @@ class BillingAccountServiceImplTest {
         void debitApplies() {
             BillingAccount account = account();
             account.credit(new BigDecimal("100.00"));
-            when(ledgerRepository.findByIdempotencyKey("k2")).thenReturn(Optional.empty());
+            when(ledgerLookup.findByIdempotencyKey("k2")).thenReturn(Optional.empty());
             when(accountRepository.findByIdForUpdate(ACCOUNT_ID)).thenReturn(Optional.of(account));
             when(ledgerRepository.save(any(LedgerEntry.class))).thenAnswer(inv -> inv.getArgument(0));
-            when(ledgerMapper.toResponse(any(LedgerEntry.class))).thenReturn(ledgerResponse());
+            when(ledgerMapper.toResponse(any(LedgerRecord.class))).thenReturn(ledgerResponse());
 
             service.debit(ACCOUNT_ID, new MoneyMovementRequestDTO(new BigDecimal("30.00"), null), "k2");
 
@@ -194,7 +199,7 @@ class BillingAccountServiceImplTest {
         @DisplayName("debit fails with insufficient funds and records nothing")
         void debitInsufficient() {
             BillingAccount account = account(); // balance 0.00
-            when(ledgerRepository.findByIdempotencyKey("k3")).thenReturn(Optional.empty());
+            when(ledgerLookup.findByIdempotencyKey("k3")).thenReturn(Optional.empty());
             when(accountRepository.findByIdForUpdate(ACCOUNT_ID)).thenReturn(Optional.of(account));
 
             assertThatThrownBy(() -> service.debit(
@@ -213,7 +218,7 @@ class BillingAccountServiceImplTest {
         void returnsPage() {
             LedgerEntry entry = ledgerEntry("k1");
             when(accountRepository.existsById(ACCOUNT_ID)).thenReturn(true);
-            when(ledgerRepository.findByAccountId(any(UUID.class), any(Pageable.class)))
+            when(ledgerHistory.read(any(UUID.class), any(Pageable.class)))
                     .thenReturn(new PageImpl<>(List.of(entry), PageRequest.of(0, 20), 1));
             when(ledgerMapper.toResponse(entry)).thenReturn(ledgerResponse());
 

@@ -39,6 +39,9 @@ class PayoutSettlementIntegrationTest extends AbstractIntegrationTest {
 
     @BeforeEach
     void resetData() {
+        // The archive half references billing_accounts too, so it has to be cleared before
+        // the accounts it points at — the FK is deliberately preserved across the seam.
+        jdbcTemplate.execute("DELETE FROM ledger_entries_archive");
         jdbcTemplate.execute("DELETE FROM ledger_entries");
         jdbcTemplate.execute("DELETE FROM payouts");
         jdbcTemplate.execute("DELETE FROM idempotency_keys");

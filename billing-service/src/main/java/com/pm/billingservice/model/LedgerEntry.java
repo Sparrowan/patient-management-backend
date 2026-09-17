@@ -23,7 +23,7 @@ import lombok.Getter;
 @Entity
 @Table(name = "ledger_entries")
 @Getter
-public class LedgerEntry extends BaseEntity {
+public final class LedgerEntry extends BaseEntity implements LedgerRecord {
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)

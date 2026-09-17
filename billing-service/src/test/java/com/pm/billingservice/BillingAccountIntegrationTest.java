@@ -37,6 +37,9 @@ class BillingAccountIntegrationTest extends AbstractIntegrationTest {
     @BeforeEach
     void resetData() {
         // Delete child (ledger) before parent (accounts) to respect the FK.
+        // The archive half references billing_accounts too, so it has to be cleared before
+        // the accounts it points at — the FK is deliberately preserved across the seam.
+        jdbcTemplate.execute("DELETE FROM ledger_entries_archive");
         jdbcTemplate.execute("DELETE FROM ledger_entries");
         jdbcTemplate.execute("DELETE FROM idempotency_keys");
         jdbcTemplate.execute("DELETE FROM billing_accounts");
