@@ -9,11 +9,14 @@ import com.pm.billingservice.dto.PagedResponse;
 import com.pm.billingservice.exception.AccountAlreadyExistsException;
 import com.pm.billingservice.exception.BillingAccountNotFoundException;
 import com.pm.billingservice.exception.InvalidCursorException;
+import com.pm.billingservice.ledger.LedgerEntryLookup;
+import com.pm.billingservice.ledger.LedgerHistoryReader;
 import com.pm.billingservice.mapper.BillingAccountMapper;
 import com.pm.billingservice.mapper.LedgerEntryMapper;
 import com.pm.billingservice.model.BillingAccount;
 import com.pm.billingservice.model.EntryType;
 import com.pm.billingservice.model.LedgerEntry;
+import com.pm.billingservice.model.LedgerRecord;
 import com.pm.billingservice.pagination.Cursor;
 import com.pm.billingservice.pagination.CursorCodec;
 import com.pm.billingservice.repository.BillingAccountRepository;
@@ -33,6 +36,8 @@ public class BillingAccountServiceImpl implements BillingAccountService {
 
     private final BillingAccountRepository accountRepository;
     private final LedgerEntryRepository ledgerRepository;
+    private final LedgerEntryLookup ledgerLookup;
+    private final LedgerHistoryReader ledgerHistory;
     private final BillingAccountMapper accountMapper;
     private final LedgerEntryMapper ledgerMapper;
 
@@ -96,8 +101,8 @@ public class BillingAccountServiceImpl implements BillingAccountService {
         if (!accountRepository.existsById(accountId)) {
             throw new BillingAccountNotFoundException(accountId);
         }
-        return PagedResponse.from(
-                ledgerRepository.findByAccountId(accountId, pageable).map(ledgerMapper::toResponse));
+        // Spans both halves of the ledger: an archived movement is still this account's history.
+        return PagedResponse.from(ledgerHistory.read(accountId, pageable).map(ledgerMapper::toResponse));
     }
 
     /** Default and hard cap for keyset page size — a bounded page keeps each seek O(limit). */
@@ -154,7 +159,9 @@ public class BillingAccountServiceImpl implements BillingAccountService {
      */
     private LedgerEntryResponseDTO applyMovement(
             UUID accountId, MoneyMovementRequestDTO request, String idempotencyKey, EntryType type) {
-        Optional<LedgerEntry> replay = ledgerRepository.findByIdempotencyKey(idempotencyKey);
+        // Both halves of the ledger, hot first — an archived key is still a used key, and the
+        // per-table unique constraint will NOT catch it for us. See LedgerEntryLookup.
+        Optional<LedgerRecord> replay = ledgerLookup.findByIdempotencyKey(idempotencyKey);
         if (replay.isPresent()) {
             return ledgerMapper.toResponse(replay.get());
         }
