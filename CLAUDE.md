@@ -174,6 +174,15 @@ com.pm.<service>/
   over a growable table. Annotate the `Pageable` param with springdoc's `@ParameterObject` so
   Swagger renders `page`/`size`/`sort` as query params (not a bogus JSON body). An unknown
   `sort` property throws `PropertyReferenceException` → mapped to 400 in the global handler.
+- **Offset vs keyset — pick per access pattern.** Offset (`Pageable`) is the default: it gives
+  random access (jump to page N) and totals, at O(offset) cost and instability under concurrent
+  inserts. For a **large, growing, forward-scrolled** history (e.g. the billing ledger), offer a
+  **keyset/cursor** endpoint instead: an opaque `cursor` over a *total-order* sort key (a unique
+  tiebreak — `(created_at, id)`, never a non-unique column alone), fetching `limit + 1` to derive
+  `hasMore`/`nextCursor` with no COUNT, backed by a composite index on the seek columns. Keyset is
+  O(limit) at any depth and stable, but drops totals + random access — so keep *both* where each
+  earns its place (offset for admin grids, keyset for statements). Cursors are opaque
+  (`CursorCodec`), a malformed one → 400.
 - **Every endpoint is documented** with springdoc OpenAPI (`@Operation`, `@ApiResponse`,
   `@Tag`) so `/swagger-ui.html` stays complete.
 - **Idempotency is two-level** (billing). A non-idempotent POST that a client may safely retry gets
@@ -407,6 +416,15 @@ compilation problems` / `No qualifying bean of type PatientMapper` at startup). 
       `IN_PROGRESS` row — which is exactly why this is a *convenience* layer and the **domain unique key
       stays the correctness backstop for money**; even a double-take of a stale claim can't double-apply.
       Wired on `credit` as the proving ground; the other money POSTs adopt `@Idempotent` next.
+- [x] **Keyset (cursor) pagination on the ledger (billing)** — a scalable pagination archetype next to
+      the existing offset paging. `GET /api/v1/billing-accounts/{id}/ledger/keyset?cursor=&limit=`
+      seeks with `(created_at, id) < (:ts, :id)` (tuple tiebreak → total order → exact page boundaries),
+      fetches `limit + 1` to derive `hasMore`/`nextCursor` **without a COUNT**, backed by a composite
+      index `idx_ledger_account_created_id` (V10). O(limit) at any depth and **stable under concurrent
+      inserts** (proven by an insert-between-pages test where offset would duplicate a row); the price
+      is no totals / no random page access — so the offset `/ledger` stays for admin/random access. The
+      `cursor` is opaque (`CursorCodec`, base64 of `(instant, id)`); a malformed one → 400
+      (`InvalidCursorException`). `CursorPage<T>` deliberately carries no total count.
 - [x] **analytics-service — CQRS read side** (`:4003`, own `analytics_db`). No command API: its state
       is built by **projecting** `patient-events` (its own consumer group) into denormalized **read
       models**, served by read-only query endpoints (`/api/v1/analytics/{registrations,summary,active}`,
