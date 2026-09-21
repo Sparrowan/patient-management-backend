@@ -1,0 +1,834 @@
+<title>Six Countries, One Primary</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap">
+
+<style>
+  :root {
+    --ground:      #F6F8F7;
+    --surface:     #FFFFFF;
+    --surface-sub: #EDF1EF;
+    --ink:         #141C1A;
+    --ink-soft:    #3D4B47;
+    --ink-mute:    #6C7C77;
+    --rule:        #D8E0DC;
+    --rule-soft:   #E6ECE9;
+
+    --ok:      #0E6E5B;
+    --ok-bg:   #E3F0EC;
+    --warn:    #9A5C05;
+    --warn-bg: #F6EBDA;
+    --wall:    #A32D25;
+    --wall-bg: #F6E4E2;
+
+    --accent:  #0E6E5B;
+
+    --shadow: 0 1px 2px rgba(20, 28, 26, .05), 0 6px 18px -10px rgba(20, 28, 26, .18);
+
+    color-scheme: light dark;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:      #0E1413;
+      --surface:     #161E1C;
+      --surface-sub: #1D2725;
+      --ink:         #E7EEEB;
+      --ink-soft:    #B6C4C0;
+      --ink-mute:    #7E8F8A;
+      --rule:        #2A3634;
+      --rule-soft:   #212B29;
+
+      --ok:      #4FBFA2;
+      --ok-bg:   #12302A;
+      --warn:    #D99A3E;
+      --warn-bg: #33270F;
+      --wall:    #E8756A;
+      --wall-bg: #38201D;
+
+      --accent:  #4FBFA2;
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 6px 18px -10px rgba(0,0,0,.6);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ground:      #0E1413;
+    --surface:     #161E1C;
+    --surface-sub: #1D2725;
+    --ink:         #E7EEEB;
+    --ink-soft:    #B6C4C0;
+    --ink-mute:    #7E8F8A;
+    --rule:        #2A3634;
+    --rule-soft:   #212B29;
+
+    --ok:      #4FBFA2;
+    --ok-bg:   #12302A;
+    --warn:    #D99A3E;
+    --warn-bg: #33270F;
+    --wall:    #E8756A;
+    --wall-bg: #38201D;
+
+    --accent:  #4FBFA2;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 6px 18px -10px rgba(0,0,0,.6);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: 16.5px;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 0 28px 96px;
+  }
+
+  .col {
+    max-width: 68ch;
+  }
+
+  h1, h2, h3 {
+    font-family: "Bricolage Grotesque", "IBM Plex Sans", sans-serif;
+    text-wrap: balance;
+    margin: 0;
+  }
+
+  /* ---- masthead ---- */
+
+  header {
+    padding: 60px 0 34px;
+    border-bottom: 2px solid var(--ink);
+    margin-bottom: 0;
+  }
+
+  .eyebrow {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 11.5px;
+    letter-spacing: .13em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+    align-items: baseline;
+    margin-bottom: 20px;
+  }
+  .eyebrow .sep { color: var(--rule); }
+
+  h1 {
+    font-size: clamp(38px, 6.2vw, 68px);
+    font-weight: 800;
+    line-height: 1.02;
+    letter-spacing: -.028em;
+    margin-bottom: 18px;
+  }
+
+  .standfirst {
+    font-size: 19px;
+    line-height: 1.55;
+    color: var(--ink-soft);
+    max-width: 60ch;
+  }
+  .standfirst strong { color: var(--ink); font-weight: 600; }
+
+  /* ---- verdict band ---- */
+
+  .verdict {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+    border-bottom: 1px solid var(--rule);
+    padding: 30px 0 34px;
+  }
+  @media (min-width: 820px) {
+    .verdict { grid-template-columns: 200px minmax(0, 1fr); gap: 36px; }
+  }
+
+  .verdict-label {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11.5px;
+    letter-spacing: .13em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+    padding-top: 6px;
+  }
+
+  .verdict p { margin: 0 0 14px; max-width: 64ch; }
+  .verdict p:last-child { margin-bottom: 0; }
+
+  .pull {
+    font-family: "Bricolage Grotesque", sans-serif;
+    font-weight: 600;
+    font-size: clamp(20px, 2.6vw, 25px);
+    line-height: 1.32;
+    letter-spacing: -.012em;
+    color: var(--ink);
+    margin: 0 0 16px;
+    max-width: 30ch;
+  }
+
+  /* ---- sections ---- */
+
+  section { padding: 46px 0 8px; border-bottom: 1px solid var(--rule-soft); }
+  section:last-of-type { border-bottom: none; }
+
+  h2 {
+    font-size: 27px;
+    font-weight: 700;
+    letter-spacing: -.02em;
+    margin-bottom: 8px;
+  }
+
+  .section-note {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11.5px;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+    margin-bottom: 22px;
+  }
+
+  p { margin: 0 0 16px; }
+  .col p:last-child { margin-bottom: 0; }
+
+  strong { font-weight: 600; }
+  em { font-style: italic; }
+
+  code, .mono {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: .88em;
+  }
+  code {
+    background: var(--surface-sub);
+    padding: .12em .38em;
+    border-radius: 3px;
+    color: var(--ink);
+  }
+
+  a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  a:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 2px; }
+
+  /* ---- measurement table ---- */
+
+  .scroller { overflow-x: auto; margin: 26px 0 8px; }
+
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    font-variant-numeric: tabular-nums;
+    font-size: 15px;
+  }
+  th, td {
+    text-align: right;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--rule-soft);
+    white-space: nowrap;
+  }
+  th:first-child, td:first-child { text-align: left; }
+  thead th {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px;
+    letter-spacing: .09em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+    border-bottom: 1px solid var(--rule);
+    font-weight: 500;
+  }
+  tbody td { font-family: "IBM Plex Mono", monospace; }
+  tbody td:first-child { font-family: "IBM Plex Sans", sans-serif; }
+  tr.peak td { background: var(--ok-bg); }
+  tr.past td { color: var(--ink-mute); }
+
+  .caption {
+    font-size: 13.5px;
+    color: var(--ink-mute);
+    max-width: 62ch;
+    margin-top: 12px;
+  }
+
+  /* ---- chart ---- */
+
+  figure { margin: 30px 0 4px; }
+  svg { display: block; width: 100%; height: auto; }
+
+  /* ---- findings ---- */
+
+  .findings { display: flex; flex-direction: column; gap: 0; margin-top: 8px; }
+
+  .finding {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px 30px;
+    padding: 26px 0 26px 20px;
+    border-top: 1px solid var(--rule-soft);
+    border-left: 3px solid var(--stripe, var(--rule));
+  }
+  @media (min-width: 820px) {
+    .finding { grid-template-columns: 190px minmax(0, 1fr); }
+  }
+  .finding:first-child { border-top: none; }
+  .finding.is-wall { --stripe: var(--wall); }
+  .finding.is-warn { --stripe: var(--warn); }
+  .finding.is-ok   { --stripe: var(--ok); }
+
+  .chip {
+    display: inline-block;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 10.5px;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    padding: 4px 9px;
+    border-radius: 3px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .chip.wall { background: var(--wall-bg); color: var(--wall); }
+  .chip.warn { background: var(--warn-bg); color: var(--warn); }
+  .chip.ok   { background: var(--ok-bg);   color: var(--ok); }
+
+  .finding h3 {
+    font-size: 19.5px;
+    font-weight: 700;
+    letter-spacing: -.014em;
+    margin-bottom: 8px;
+  }
+  .finding p { margin-bottom: 12px; max-width: 64ch; }
+  .finding p:last-child { margin-bottom: 0; }
+
+  .evidence {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12.5px;
+    line-height: 1.7;
+    background: var(--surface-sub);
+    border-radius: 4px;
+    padding: 12px 15px;
+    margin: 0 0 14px;
+    color: var(--ink-soft);
+    overflow-x: auto;
+    white-space: pre;
+  }
+  .evidence b { color: var(--ink); font-weight: 600; }
+
+  /* ---- scales list ---- */
+
+  .scales {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1px;
+    background: var(--rule-soft);
+    border: 1px solid var(--rule-soft);
+    border-radius: 5px;
+    overflow: hidden;
+    margin-top: 24px;
+  }
+  @media (min-width: 720px) { .scales { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+  .scale-item {
+    background: var(--surface);
+    padding: 16px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .scale-item .what {
+    font-weight: 600;
+    font-size: 15.5px;
+    letter-spacing: -.008em;
+  }
+  .scale-item .why {
+    font-size: 14px;
+    color: var(--ink-mute);
+    line-height: 1.5;
+  }
+
+  /* ---- country grid ---- */
+
+  .countries { margin-top: 24px; display: flex; flex-direction: column; gap: 22px; }
+  .country-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px 28px;
+    align-items: start;
+  }
+  @media (min-width: 820px) {
+    .country-row { grid-template-columns: 210px minmax(0, 1fr); }
+  }
+  .country-row .k {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12px;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: var(--accent);
+    font-weight: 600;
+    padding-top: 4px;
+  }
+  .country-row p { margin: 0; max-width: 64ch; }
+
+  /* ---- next steps ---- */
+
+  ol.steps { margin: 22px 0 0; padding: 0; list-style: none; counter-reset: s; display: flex; flex-direction: column; gap: 18px; }
+  ol.steps li {
+    counter-increment: s;
+    display: grid;
+    grid-template-columns: 34px minmax(0, 1fr);
+    gap: 16px;
+    align-items: start;
+  }
+  ol.steps li::before {
+    content: counter(s);
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--accent);
+    border: 1px solid var(--rule);
+    border-radius: 50%;
+    width: 30px; height: 30px;
+    display: grid; place-items: center;
+    background: var(--surface);
+  }
+  ol.steps p { margin: 0; max-width: 62ch; }
+  ol.steps .h { font-weight: 600; display: block; margin-bottom: 2px; }
+
+  footer {
+    margin-top: 56px;
+    padding-top: 22px;
+    border-top: 1px solid var(--rule);
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12px;
+    color: var(--ink-mute);
+    line-height: 1.8;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .finding, section { transition: none; }
+  }
+</style>
+
+<div class="wrap">
+
+  <header>
+    <div class="eyebrow">
+      <span>Scale audit</span><span class="sep">/</span>
+      <span>patient-management</span><span class="sep">/</span>
+      <span>17 Sep 2026</span><span class="sep">/</span>
+      <span>measured on 8-core / 8&nbsp;GB Docker</span>
+    </div>
+    <h1>Six countries,<br>one write primary</h1>
+    <p class="standfirst">
+      The load test measured a laptop. This is the question underneath it: <strong>does this
+      architecture get faster when you give it more machines?</strong> Mostly yes — and the
+      exceptions are specific enough to name, one of which is switched on right now.
+    </p>
+  </header>
+
+  <div class="verdict">
+    <div class="verdict-label">Verdict</div>
+    <div>
+      <p class="pull">The shape is right. Three things won't scale by buying hardware — and only one of them is hard.</p>
+      <p>
+        Stateless services, a database per service, background workers that claim work with
+        <code>SKIP LOCKED</code>, and idempotency at two levels. That combination is what makes
+        "add replicas" a real answer rather than a hope, and most projects of this size don't have it.
+      </p>
+      <p>
+        What stops it is not the code you've written. It is <strong>one Kafka partition</strong>
+        (live today, invisible until you scale out), <strong>connection-pool arithmetic</strong>
+        (tunable, ~14 instances per database), and <strong>a single write primary per service</strong>
+        — the only genuinely architectural one. For a six-country deployment, that last wall is likely
+        solved for you by regulation before you ever have to build sharding.
+      </p>
+    </div>
+  </div>
+
+  <section>
+    <h2>What the load test actually proved</h2>
+    <div class="section-note">And, more usefully, what it didn't</div>
+    <div class="col">
+      <p>
+        Both curves below were measured on the same saturated box, so the absolute numbers describe
+        this laptop and nothing else. The <em>relationship</em> between them is the finding.
+      </p>
+    </div>
+
+    <figure>
+      <svg viewBox="0 0 760 330" role="img" aria-label="Throughput against concurrency. A no-op endpoint peaks near 2,283 requests per second at concurrency 50 then declines. A real cached read climbs to 1,782 at concurrency 100, then collapses to 882 at concurrency 200.">
+        <!-- grid -->
+        <g stroke="var(--rule-soft)" stroke-width="1">
+          <line x1="72" y1="40"  x2="716" y2="40"/>
+          <line x1="72" y1="100" x2="716" y2="100"/>
+          <line x1="72" y1="160" x2="716" y2="160"/>
+          <line x1="72" y1="220" x2="716" y2="220"/>
+        </g>
+        <line x1="72" y1="270" x2="716" y2="270" stroke="var(--rule)" stroke-width="1.5"/>
+
+        <!-- y labels: 0 .. 2500 -->
+        <g fill="var(--ink-mute)" font-family="IBM Plex Mono, monospace" font-size="11" text-anchor="end">
+          <text x="62" y="44">2500</text>
+          <text x="62" y="104">2000</text>
+          <text x="62" y="164">1500</text>
+          <text x="62" y="224">1000</text>
+          <text x="62" y="274">500</text>
+        </g>
+        <text x="72" y="22" fill="var(--ink-mute)" font-family="IBM Plex Mono, monospace" font-size="11">req/s</text>
+
+        <!-- x labels -->
+        <g fill="var(--ink-mute)" font-family="IBM Plex Mono, monospace" font-size="11" text-anchor="middle">
+          <text x="110" y="292">10</text>
+          <text x="248" y="292">25</text>
+          <text x="386" y="292">50</text>
+          <text x="524" y="292">100</text>
+          <text x="662" y="292">200</text>
+        </g>
+        <text x="394" y="316" fill="var(--ink-mute)" font-family="IBM Plex Mono, monospace" font-size="11" text-anchor="middle">concurrent connections</text>
+
+        <!-- no-op: 1275,1862,2283,1857,1563  => y = 270 - (v-500)/2000*230 -->
+        <polyline points="110,181 248,113 386,65 524,114 662,148"
+                  fill="none" stroke="var(--ink-mute)" stroke-width="2" stroke-dasharray="5 4"
+                  stroke-linejoin="round" stroke-linecap="round"/>
+        <g fill="var(--ink-mute)">
+          <circle cx="110" cy="181" r="3.5"/><circle cx="248" cy="113" r="3.5"/>
+          <circle cx="386" cy="65" r="3.5"/><circle cx="524" cy="114" r="3.5"/>
+          <circle cx="662" cy="148" r="3.5"/>
+        </g>
+
+        <!-- real read: 749,1001,1452,1782,882 -->
+        <polyline points="110,241 248,212 386,160 524,123 662,226"
+                  fill="none" stroke="var(--accent)" stroke-width="2.5"
+                  stroke-linejoin="round" stroke-linecap="round"/>
+        <g fill="var(--accent)">
+          <circle cx="110" cy="241" r="4"/><circle cx="248" cy="212" r="4"/>
+          <circle cx="386" cy="160" r="4"/><circle cx="524" cy="123" r="4"/>
+        </g>
+        <circle cx="662" cy="226" r="5.5" fill="var(--wall)"/>
+
+        <!-- annotations -->
+        <text x="386" y="52" fill="var(--ink-mute)" font-family="IBM Plex Mono, monospace" font-size="11" text-anchor="middle">2283 no-op peak</text>
+        <text x="524" y="110" fill="var(--accent)" font-family="IBM Plex Mono, monospace" font-size="11" text-anchor="middle" font-weight="600">1782</text>
+        <text x="648" y="248" fill="var(--wall)" font-family="IBM Plex Mono, monospace" font-size="11" text-anchor="end">882 — past the knee</text>
+
+        <!-- legend -->
+        <g font-family="IBM Plex Mono, monospace" font-size="11">
+          <line x1="86" y1="40" x2="116" y2="40" stroke="var(--ink-mute)" stroke-width="2" stroke-dasharray="5 4"/>
+          <text x="124" y="44" fill="var(--ink-mute)">/actuator/health/liveness</text>
+          <line x1="86" y1="60" x2="116" y2="60" stroke="var(--accent)" stroke-width="2.5"/>
+          <text x="124" y="64" fill="var(--accent)">GET /patients/{id} — JWT + cache</text>
+        </g>
+      </svg>
+    </figure>
+
+    <div class="col">
+      <p>
+        A JWT-verified, cache-backed, JSON-serialising read reaches <strong>78% of the throughput of an
+        endpoint that does nothing at all</strong>. Every piece of security, business logic and
+        serialisation you wrote costs about a fifth of the budget. The application is not the expensive part.
+      </p>
+      <p>
+        The expensive part is the host, and it can be shown rather than asserted. During the
+        200-connection run the containers accounted for roughly 3.6 of 8 cores, while the host had
+        <strong>0.7% idle CPU and 57.5% of it in the kernel</strong> — that missing time is the load
+        generator plus the virtualisation and network layer, not your services.
+      </p>
+      <p>
+        Note the shape at the right-hand edge: doubling offered load from 100 to 200 connections
+        <em>halved</em> throughput and multiplied p95 latency by seven, with zero failed requests.
+        That is queueing, not breakage — and it is why "throw more concurrency at it" is the wrong
+        reflex, and why a benchmark reported at a single concurrency level tells you nothing.
+      </p>
+    </div>
+
+    <div class="scroller">
+      <table>
+        <thead>
+          <tr><th>Run</th><th>Connections</th><th>Throughput</th><th>p95</th><th>Failures</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>No-op ceiling</td><td>10</td><td>1,275/s</td><td>9 ms</td><td>0</td></tr>
+          <tr><td>No-op ceiling</td><td>25</td><td>1,862/s</td><td>18 ms</td><td>0</td></tr>
+          <tr class="peak"><td>No-op ceiling</td><td>50</td><td>2,283/s</td><td>110 ms</td><td>0</td></tr>
+          <tr class="past"><td>No-op ceiling</td><td>200</td><td>1,563/s</td><td>481 ms</td><td>0</td></tr>
+          <tr><td>Cached read</td><td>50</td><td>1,452/s</td><td>94 ms</td><td>0</td></tr>
+          <tr class="peak"><td>Cached read</td><td>100</td><td>1,782/s</td><td>151 ms</td><td>0</td></tr>
+          <tr class="past"><td>Cached read</td><td>200</td><td>882/s</td><td>1,070 ms</td><td>0</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="caption">
+      Highlighted rows are each run's peak — the knee. Below it, adding load adds throughput; above it,
+      adding load adds only latency. 10,000 req/s is roughly 4× this machine's no-op ceiling; 100,000
+      is roughly 45×. Those are facts about the laptop.
+    </p>
+  </section>
+
+  <section>
+    <h2>What scales by adding machines</h2>
+    <div class="section-note">Verified in the codebase, not assumed</div>
+    <div class="scales">
+      <div class="scale-item">
+        <span class="what">Stateless services</span>
+        <span class="why">JWTs verified locally against JWKS. No session store, no sticky sessions — any replica serves any request.</span>
+      </div>
+      <div class="scale-item">
+        <span class="what">Database per service</span>
+        <span class="why">No shared database to become the common bottleneck. Blast radius and capacity are both per-service.</span>
+      </div>
+      <div class="scale-item">
+        <span class="what">Outbox relay</span>
+        <span class="why"><code>SELECT … FOR UPDATE SKIP LOCKED</code> — N replicas claim disjoint batches. No double publish, no blocking.</span>
+      </div>
+      <div class="scale-item">
+        <span class="what">Payout saga worker</span>
+        <span class="why">Same claim pattern, backed by <code>idx_payouts_due</code> so the lock is row-precise rather than over-broad.</span>
+      </div>
+      <div class="scale-item">
+        <span class="what">Rate limiting</span>
+        <span class="why">Token-bucket state in Redis, so the limit holds across gateway replicas instead of per-instance.</span>
+      </div>
+      <div class="scale-item">
+        <span class="what">Read replicas</span>
+        <span class="why">Routing by <code>readOnly</code>, with a per-query escape hatch for reads that must not be stale.</span>
+      </div>
+      <div class="scale-item">
+        <span class="what">Keyset pagination</span>
+        <span class="why">O(limit) at any depth, no COUNT. Deep pages cost the same as the first one.</span>
+      </div>
+      <div class="scale-item">
+        <span class="what">Ledger archival</span>
+        <span class="why">Bounds the hot working set on a table that may never be deleted from.</span>
+      </div>
+      <div class="scale-item">
+        <span class="what">Two-level idempotency</span>
+        <span class="why">The quiet precondition for all of it: scaling out means retries, and retries are only safe if replaying is.</span>
+      </div>
+      <div class="scale-item">
+        <span class="what">Transactional outbox</span>
+        <span class="why">No dual write. Event delivery survives crashes, which is what lets instances be disposable.</span>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>What doesn't</h2>
+    <div class="section-note">Three walls, in ascending order of difficulty</div>
+
+    <div class="findings">
+
+      <div class="finding is-wall">
+        <div><span class="chip wall">Live now</span></div>
+        <div>
+          <h3>Kafka runs on one partition</h3>
+          <div class="evidence">$ kafka-topics --describe --topic patient-events
+Topic: patient-events   <b>PartitionCount: 1</b>   ReplicationFactor: 1</div>
+          <p>
+            Consumer parallelism inside a group is capped by partition count, not by replica count.
+            Scale <code>billing-service</code> to ten instances today and <strong>nine of them sit idle
+            on this topic</strong> while one does all the projection work.
+          </p>
+          <p>
+            This is the most dangerous class of scaling bug, because a single instance works perfectly
+            — the defect only appears at the exact moment you reach for the fix. Nothing in a dev
+            environment will ever reveal it.
+          </p>
+          <p>
+            Raising the count is the fix, and keying by aggregate id already preserves per-aggregate
+            ordering across partitions. Two cautions: partitions can be added but never removed, and
+            adding them re-maps keys to partitions, so events for one aggregate can briefly land out of
+            order across the change. Size it once, deliberately, above your expected consumer count.
+          </p>
+        </div>
+      </div>
+
+      <div class="finding is-warn">
+        <div><span class="chip warn">Tunable</span></div>
+        <div>
+          <h3>Connection-pool arithmetic caps instance count</h3>
+          <div class="evidence">HikariCP maximum-pool-size   10   (Spring default, undeclared)
+MariaDB   max_connections  151
+
+<b>replicas × pool_max  <  max_connections − headroom</b>
+    14 × 10 = 140  ·  151 − 10 = 141        ← ceiling</div>
+          <p>
+            About fourteen instances per database, and exhaustion does not announce itself — it
+            presents as connection-acquisition timeouts under load, which read like a slow database
+            rather than a misconfigured pool.
+          </p>
+          <p>
+            Worth internalising the counter-intuitive half: a <em>bigger</em> pool is usually worse.
+            Small pools (10–20) generally outperform large ones, because the database can only execute
+            so much concurrently and a deep pool just relocates the queue somewhere you can't see it.
+            The lever to reach for first is <code>open-in-view=false</code> — already set — which returns
+            connections at the end of the service method instead of the end of the request.
+          </p>
+        </div>
+      </div>
+
+      <div class="finding is-wall">
+        <div><span class="chip wall">Architectural</span></div>
+        <div>
+          <h3>Every write lands on a single primary</h3>
+          <p>
+            Read replicas, the Redis cache, keyset pagination and ledger archival all push this wall
+            further away. <strong>None of them move it.</strong> Every registration, credit, debit,
+            transfer and payout still terminates at one primary per service, and that primary is the
+            ceiling on write throughput no matter how many application instances front it.
+          </p>
+          <p>
+            This is the honest answer to "will it scale if I add resources": reads scale by copying,
+            writes do not. Beyond this point the lever is sharding — splitting the data tier by key —
+            which is the most invasive change in the catalogue and is not built here.
+          </p>
+          <p>
+            The trigger is worth stating precisely, because it is widely misunderstood: you shard when
+            <em>write throughput exceeds one primary</em> or the working set exceeds RAM. Not when the
+            row count gets large. A single indexed InnoDB node is comfortable at hundreds of millions of
+            rows — an indexed lookup costs three to five page reads whether the table holds a million
+            rows or a billion.
+          </p>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <section>
+    <h2>Three things that aren't walls but will bite</h2>
+    <div class="section-note">Operational, and cheap to fix before they matter</div>
+    <div class="findings">
+      <div class="finding is-warn">
+        <div><span class="chip warn">Deploy-time</span></div>
+        <div>
+          <h3>Every scheduled job fires on every instance at startup</h3>
+          <p>
+            <code>@Scheduled(fixedDelay=…)</code> with no initial delay runs immediately on context
+            start. That is convenient — it is how the archival sweep was verified live by restarting a
+            container — but during a rolling deploy of N replicas it means N simultaneous sweeps.
+            Safe here, because each job is either <code>SKIP LOCKED</code>-claimed or idempotent. Still a
+            shape to recognise: it is a thundering herd that scales with your replica count.
+          </p>
+        </div>
+      </div>
+      <div class="finding is-warn">
+        <div><span class="chip warn">Availability</span></div>
+        <div>
+          <h3>The synchronous delete veto has no circuit breaker</h3>
+          <p>
+            Resilience4j was removed along with the old gRPC client when registration moved to Kafka,
+            and the surviving synchronous call — <code>CloseAccountForPatient</code> — never got it back.
+            A 3-second deadline bounds each call, but under a billing-service brownout every delete
+            waits the full three seconds before failing. Across regions, that coupling gets
+            considerably more expensive.
+          </p>
+        </div>
+      </div>
+      <div class="finding is-ok">
+        <div><span class="chip ok">Known gap</span></div>
+        <div>
+          <h3>No service discovery or config server</h3>
+          <p>
+            Service addresses are environment variables today, which is fine at four services and
+            becomes unmanageable well before it becomes dangerous. Already on the roadmap; Kubernetes-native
+            discovery would make it a non-decision.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>What six countries actually changes</h2>
+    <div class="section-note">Where the interesting problems move to</div>
+    <div class="col">
+      <p>
+        The instinct that a multi-country deployment is "the same thing, bigger" is the one worth
+        discarding early. Almost none of the difficulty is throughput.
+      </p>
+    </div>
+
+    <div class="countries">
+      <div class="country-row">
+        <div class="k">Residency</div>
+        <p>
+          Several markets require that personal and financial data stay in-country. That forces
+          per-country deployments — which <em>is</em> sharding, with country as the shard key, handed to
+          you by a regulator instead of designed by you. Each country gets its own write primary, and
+          the wall above stops being the binding constraint without your building a global sharding layer.
+        </p>
+      </div>
+      <div class="country-row">
+        <div class="k">The global remainder</div>
+        <p>
+          Once per-country is the default, the design question inverts: <strong>what, if anything, is
+          global?</strong> Cross-border transfers, FX, group-level reporting, a customer who exists in
+          two markets. That small remainder is where the sagas, the settlement logic and the
+          reconciliation live — and it is the genuinely hard engineering.
+        </p>
+      </div>
+      <div class="country-row">
+        <div class="k">Multi-currency</div>
+        <p>
+          A correctness concern, not a scaling one. Amounts must never be summed across currencies —
+          <code>CurrencyMismatchException</code> is the right instinct already in place. What's missing
+          is everything around a rate: which rate applied, when it was valid, and who bore the spread.
+          Those become ledger facts, not lookups.
+        </p>
+      </div>
+      <div class="country-row">
+        <div class="k">Call locality</div>
+        <p>
+          The synchronous gRPC veto costs milliseconds inside one region and a hundred-plus across
+          them, while coupling availability across a border. The rule that follows: synchronous calls
+          stay in-region; anything crossing a border is asynchronous, with a visible pending state.
+        </p>
+      </div>
+      <div class="country-row">
+        <div class="k">Retention</div>
+        <p>
+          Retention windows differ by jurisdiction, so the ledger archival cutoff and the idempotency
+          TTL become per-country configuration rather than constants. Both were built as configuration
+          already, which is the useful part.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>How to actually prove it</h2>
+    <div class="section-note">In order, because each answers the previous one's question</div>
+    <ol class="steps">
+      <li>
+        <p><span class="h">Raise the partition count, then run two consumers.</span>
+        Verify the work splits. This is the one live defect, and it is also the cheapest possible
+        experiment: scale the consumer to two instances and watch whether both do work.</p>
+      </li>
+      <li>
+        <p><span class="h">Re-measure where the box isn't the bottleneck.</span>
+        One instance, then two, then four, on hardware with the load generator somewhere else. The
+        claim is linear scaling; it is worth having measured rather than believed. Everything on this
+        laptop is confounded by 0.7% idle CPU.</p>
+      </li>
+      <li>
+        <p><span class="h">Load the write path separately.</span>
+        Credits against <em>one</em> account versus spread across many isolates pessimistic-lock
+        contention exactly. Expect a far lower ceiling than reads, and expect that to be correct
+        behaviour rather than a defect.</p>
+      </li>
+      <li>
+        <p><span class="h">Then size it.</span>
+        With a real per-request cost from step 2, the instance count, database capacity and connection
+        budget for a target rate is arithmetic. Doing that calculation from measurements you trust is
+        the defensible version of "yes, it scales".</p>
+      </li>
+    </ol>
+  </section>
+
+  <footer>
+    Measured 17 Sep 2026 · ApacheBench and k6 against patient-service :4000 · MariaDB 11.7 · 8 vCPU / 8 GB Docker Desktop<br>
+    Absolute throughput figures describe the test machine and should not be quoted as system capacity.
+  </footer>
+
+</div>

@@ -1,0 +1,3 @@
+
+# Load-test summary exports — one machine, one run; not a repo artifact.
+loadtest/*.json
