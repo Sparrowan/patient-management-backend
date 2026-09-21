@@ -340,6 +340,75 @@ data-tier + infra concern. Spring's role is routing (`AbstractRoutingDataSource`
 starter) and staying stateless so replicas are free; the heavy lifting (Vitess, replicas, CDN, HPA)
 lives *below or around* the app, which is exactly why the app barely changes as you climb the tiers.
 
+## Scale-readiness plan — measured, then sequenced
+
+> Added 2026-09-21 after a load test and an architecture audit. The audit is in
+> `loadtest/scale-audit.html`; the k6 / ApacheBench scripts are in `loadtest/`.
+
+### What the measurement established
+
+Run on an 8-core / 8 GB Docker Desktop host, so **absolute figures describe that machine**, not the
+system. The relationships are the findings:
+
+| Run                                           | Peak        | At              | p95 at peak |
+| --------------------------------------------- | ----------- | --------------- | ----------- |
+| No-op (`/actuator/health/liveness`)           | 2,283 req/s | 50 connections  | 110 ms      |
+| Real read (`GET /patients/{id}`, JWT + cache) | 1,782 req/s | 100 connections | 151 ms      |
+
+- A JWT-verified, cache-backed read reaches **78% of the throughput of an endpoint that does
+  nothing** — the application is cheap; the host is the constraint. During the 200-connection run
+  the host had **0.7% idle CPU with 57.5% in the kernel**, while containers accounted for ~3.6 of
+  8 cores: the rest is the load generator plus virtualisation.
+- **Past the knee, more load produces less work.** 100 → 200 connections halved throughput and
+  multiplied p95 by seven, with zero failures. Queueing, not breakage.
+- **Never load-test through the gateway.** Its per-user/IP token bucket rejects the traffic; you
+  measure the limiter. Target a service port directly.
+
+### The arcs, in dependency order
+
+- [ ] **A — Kafka partitions + multi-instance consumer proof.** `patient-events` has
+      **`PartitionCount: 1`** today, so consumer parallelism in a group is 1 *regardless of replica
+      count* — scale `billing-service` to ten and nine sit idle. The most dangerous class of scaling
+      bug: a single instance works perfectly, so it only appears at the moment you reach for the fix.
+      Raise it declaratively (a `NewTopic` bean, not a CLI command), then prove work splits across two
+      consumer instances and that per-aggregate ordering still holds (key = `patientId`). Note both
+      hazards: partitions can be added but never removed, and adding them re-maps keys to partitions,
+      so one aggregate's events can briefly land out of order across the change. **Blocks every other
+      multi-instance experiment**, so it goes first.
+- [ ] **B — Scheduler start-up herd + explicit pool config.** `@Scheduled(fixedDelay=…)` with no
+      initial delay runs immediately on context start, so a rolling deploy of N replicas fires N
+      simultaneous sweeps (outbox relay, outbox retention, payout saga, idempotency sweep, ledger
+      archival). Safe here — each is `SKIP LOCKED`-claimed or idempotent — but it is a thundering herd
+      that scales with replica count; add an initial delay plus jitter. Then declare the Hikari pool
+      explicitly rather than inheriting the default 10, and write the ceiling down:
+      `replicas × pool_max < max_connections − headroom` → **~14 instances per database** at 10/151
+      today. Exhaustion presents as acquisition timeouts, which read like a slow database.
+      Must land before C, so the write-path test measures a pool we chose.
+- [ ] **C — Write-path load testing.** Where the real ceiling lives, and it is the money path. The
+      experiment that isolates it: **credits against one account vs spread across many** — same total
+      load, and the difference is purely pessimistic-lock contention on `SELECT … FOR UPDATE`. If
+      single-account throughput stays flat while many-account scales, the ceiling is the lock, not
+      CPU — which is the shape of a hot account on payday. Correlate with the HikariCP and JVM
+      metrics already on `/actuator/prometheus`, then do the sizing arithmetic.
+- [ ] **D — Circuit breaker on the synchronous veto.** Resilience4j was removed with the old gRPC
+      client when registration moved to Kafka, and `CloseAccountForPatient` never got it back. The 3s
+      deadline bounds one call, but under a billing brownout *every* delete waits the full three
+      seconds. Cross-region that coupling gets considerably more expensive. Prove it by killing
+      billing and watching the breaker open — fast 503 instead of a 3s stall.
+- [ ] **E — Sharding: a decision record, not an implementation.** Deliberately *not* building it.
+      Data residency across the target markets forces per-country deployments anyway, which hands you
+      **country as a shard key** — a general sharding layer would solve a problem the regulator already
+      solved, via the most invasive change in the catalogue. The deliverable is the argument: why
+      per-country beats a sharding layer, what stays global (cross-border transfers, FX, group
+      reporting, a customer in two markets), and what would have to change to revisit it.
+
+### What this environment cannot answer
+
+Arcs A, B, D and most of C are about **correctness and shape** — does work split, does the breaker
+open, where does contention bite — and are fully doable here. The **linear-scaling claim** (1 → 2 → 4
+instances) is not: it needs hardware where the box is not already at 0.7% idle, with the load
+generator somewhere else. Set the experiment up here; conclude it elsewhere.
+
 ## Sources
 
 - [Scalability — AlgoMaster (lever order: vertical/horizontal, replicas, sharding, cache/CDN)](https://algomaster.io/learn/system-design/scalability)

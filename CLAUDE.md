@@ -29,12 +29,15 @@ patient-management/
 ├── billing-service/     # billing accounts + ledger; gRPC server called by patient-service
 ├── auth-service/        # JWT issuer: /login + /register, RSA-signed tokens, JWKS endpoint (:4002)
 ├── api-gateway/         # Spring Cloud Gateway — single entry point, routes to all services (:4004)
-├── docker-compose.yml   # root orchestration: every service + a DB container each + Kafka/SR
-└── analytics-service/   # CQRS read side: projects patient-events into read models (:4003)
+├── analytics-service/   # CQRS read side: projects patient-events into read models (:4003)
+├── loadtest/            # k6 / ApacheBench scripts + the measured scale audit
+├── design.drawio        # whole-system architecture diagram (uncompressed, hand-editable)
+└── docker-compose.yml   # root orchestration: every service + a DB container each + Kafka/SR
 ```
 
 **Ports:** gateway `:4004` (the single entry point clients use), patient `:4000`, billing `:4001`
-(+ gRPC `:9001`), auth `:4002`, analytics `:4003`; kafka-ui `:8080`, schema-registry `:8081`.
+(+ gRPC `:9001`), auth `:4002`, analytics `:4003`; kafka-ui `:8080`, schema-registry `:8081`,
+Prometheus `:9090`, Jaeger UI `:16686`.
 
 Each service holds its own copy of `billing.proto` under `src/main/proto/` and generates its own
 stubs — a deliberate trade-off to keep services independently buildable (no shared module / no
@@ -481,9 +484,21 @@ compilation problems` / `No qualifying bean of type PatientMapper` at startup). 
       payout **halts** the cutoff rather than being skipped past — self-healing, and it keeps the
       prefix intact. Safe because `BillingAccount.balance` is a **materialized** column: had it been a
       `SUM()` over the ledger, archiving would silently move money.
-- [ ] Next: CDC (Debezium); a **reconciliation job** (register→delete orphan, `FAILED`/ambiguous
-      payouts via a rail status-query, closed-account-mid-reversal edge). Background writes with no
-      originating user (schedulers) still audit `"system"`.
+- [ ] Next — **scale hardening**, sequenced in ROADMAP ("Scale-readiness plan"), after a load test
+      + architecture audit. Headline finding: a JWT-verified cached read hits **78% of the throughput
+      of a no-op endpoint**, so the app is cheap and the host is the constraint — but three things
+      will not improve by adding machines. **(A)** `patient-events` has **one partition**, so consumer
+      parallelism is 1 regardless of replica count; the fix is small but it **blocks every other
+      multi-instance experiment**. **(B)** Schedulers fire on every instance at start-up (a
+      deploy-time herd) and the Hikari pool is the undeclared default 10 — `replicas × pool_max <
+      max_connections` caps at ~14 instances per DB. **(C)** The write path's real ceiling is
+      pessimistic-lock contention, not CPU — measure it with credits to one account vs many. Sharding
+      is deliberately **not** being built: residency across the target markets forces per-country
+      deployments, which hands you country as a shard key.
+- [ ] Also pending: CDC (Debezium); a **reconciliation job** (register→delete orphan,
+      `FAILED`/ambiguous payouts via a rail status-query, closed-account-mid-reversal edge) — now
+      load-bearing, since a parked `FAILED` payout halts ledger archival at its timestamp. Background
+      writes with no originating user (schedulers) still audit `"system"`.
 
 **gRPC note:** uses **net.devh `grpc-spring-boot-starter` 3.1.0** on both sides, NOT the official
 `org.springframework.grpc` — its only published Boot starter (1.0.3) is binary-incompatible with
@@ -501,4 +516,3 @@ with `client-auth=REQUIRE`. Client: `grpc.client.billing.security.*` — **must 
 `client-auth-enabled=true`** or the client cert is configured but never presented (→
 `TLSV1_ALERT_CERTIFICATE_REQUIRED`). **Private keys (`*-key.pem`) are git-ignored.** Production
 moves mTLS into a service mesh (Istio/SPIFFE) with auto-rotating certs — see ROADMAP.
-- [ ] remaining services + gateway
