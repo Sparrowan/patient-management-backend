@@ -24,5 +24,16 @@ public abstract class AbstractIntegrationTest {
         registry.add("spring.datasource.url", MARIADB::getJdbcUrl);
         registry.add("spring.datasource.username", MARIADB::getUsername);
         registry.add("spring.datasource.password", MARIADB::getPassword);
+        // Kafka is NOT part of these tests, and must not be reachable from them. Left alone, the
+        // context resolves spring.kafka.bootstrap-servers to its localhost:9092 default — a real
+        // broker, if one happens to be running — and then: the listener joins the PRODUCTION
+        // consumer group (analytics-service), stealing partitions from the running service and committing
+        // offsets on its behalf; auto-offset-reset=earliest replays the whole topic into this test
+        // database; and KafkaAdmin provisions topics on that broker. A suite should not be able to
+        // perturb a running system. Pointing at a closed port fails fast (connection refused, not a
+        // timeout) and auto-startup=false means no consumer group is joined at all. The event paths
+        // are covered by driving the consumer/projector directly, which needs no broker.
+        registry.add("spring.kafka.bootstrap-servers", () -> "localhost:1");
+        registry.add("spring.kafka.listener.auto-startup", () -> "false");
     }
 }

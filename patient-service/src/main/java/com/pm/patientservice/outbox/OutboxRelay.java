@@ -7,6 +7,7 @@ import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -38,15 +39,27 @@ import lombok.RequiredArgsConstructor;
  *
  * <p><b>Multi-instance safe.</b> The batch is claimed with a {@code SELECT … FOR UPDATE SKIP LOCKED}
  * (see {@link OutboxEventRepository#lockUnpublishedBatch}), so N relays across N replicas each grab a
- * disjoint batch and publish in parallel — no double-publish, no blocking. The claim is held for the
- * whole {@code @Transactional} (including the Kafka sends), which briefly does network I/O under a row
- * lock; that's acceptable because the lock only excludes <em>other relays</em> (which skip, not block),
- * and each send is bounded by {@code SEND_TIMEOUT_SECONDS}.
+ * disjoint batch and publish in parallel — no double-publish, no blocking <em>between relays</em>.
+ *
+ * <p><b>Known defect: the claim also blocks writers.</b> The claim is held for the whole
+ * {@code @Transactional}, Kafka send included. {@code SKIP LOCKED} only helps other readers taking the
+ * same lock; the {@code WHERE published_at IS NULL} range scan takes <b>gap locks</b> under REPEATABLE
+ * READ, which block <em>inserts into that range</em> — and an insert into that range is exactly what
+ * registering a patient does. So a broker that is slow or unreachable makes every send burn
+ * {@code SEND_TIMEOUT_SECONDS} holding those gaps, and registrations start failing with
+ * {@code Lock wait timeout exceeded}. Measured: with the claim held, an insert blocked ~6s and then
+ * timed out.
+ *
+ * <p>That inverts the whole point of the outbox, which is that the business transaction must not
+ * depend on the broker. The fix is to move the send outside the claiming transaction — claim and
+ * commit, send, then stamp {@code published_at} in a second short transaction — tracked in ROADMAP.
  *
  * <p>Polling (not CDC) is the deliberate starting point — simple, no extra infra. Debezium/CDC is the
  * scale evolution. See ROADMAP.
  */
 @Component
+@ConditionalOnProperty(prefix = "outbox.relay", name = "enabled", havingValue = "true",
+        matchIfMissing = true)
 @RequiredArgsConstructor
 public class OutboxRelay {
 
