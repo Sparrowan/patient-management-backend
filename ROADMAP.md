@@ -366,7 +366,7 @@ system. The relationships are the findings:
 
 ### The arcs, in dependency order
 
-- [ ] **A.1 — Move the Kafka send out of the outbox relay's claiming transaction.** Found while
+- [x] **A.1 — Move the Kafka send out of the outbox relay's claiming transaction.** DONE. Found while
       isolating the test suites, and it is a genuine defect rather than a test artifact. The relay
       claims its batch with `SELECT … WHERE published_at IS NULL … FOR UPDATE SKIP LOCKED` and holds
       that claim for the whole `@Transactional`, Kafka send included. `SKIP LOCKED` only spares other

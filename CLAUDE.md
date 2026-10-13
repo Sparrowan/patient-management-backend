@@ -218,12 +218,19 @@ com.pm.<service>/
   a crash between them loses the event). The event is written to an `outbox_events` row **in the
   same transaction** as the business change; a `@Scheduled` **`OutboxRelay`** ships unpublished rows
   to Kafka and stamps `published_at`. Delivery is **at-least-once**; combined with an idempotent
-  consumer it's effectively exactly-once. Relay claims each batch with a native **`SELECT … FOR
-  UPDATE SKIP LOCKED`** (`OutboxEventRepository.lockUnpublishedBatch`), so it's **multi-instance
-  safe**: N relays across N replicas each grab a *disjoint* batch (a second relay skips the locked
-  rows, never blocks or double-publishes) and the claim is held until the tx commits. Correct
-  row-precise locking depends on the `idx_outbox_unpublished` index — without it the DB filesorts and
-  over-locks the batch. CDC (Debezium) is the further scale evolution — see ROADMAP.
+  consumer it's effectively exactly-once. The relay claims each batch by stamping a **durable lease**
+  (`claimed_until` + `claim_token`, `OutboxEventRepository.claimBatch`) in a short
+  **`READ_COMMITTED`** transaction, publishes with **no transaction open**, then settles each row in
+  its own short transaction. Multi-instance safe because the claiming `UPDATE` is atomic — a racing
+  relay's predicate stops matching once the winner stamps a future `claimed_until`. **This replaced a
+  real defect:** the claim used to be `SELECT … FOR UPDATE SKIP LOCKED` held across the send (the
+  lock *was* the claim, so it had to outlive it), but `SKIP LOCKED` only spares other readers of the
+  same lock, and under REPEATABLE READ the `published_at IS NULL` range scan **gap-locks** the range
+  a registration inserts into — so a slow broker made `POST /patients` fail with lock-wait timeouts,
+  inverting the pattern's whole purpose. Gap locks cover **what the scan reads**, so the blocking only
+  appears when the claim *exhausts* the range (batch size > pending rows) and locks the supremum gap
+  — which is the normal production shape, and the reason the first regression test passed against the
+  bug. Failures release the claim (immediate retry); lease expiry recovers a dead relay. CDC (Debezium) is the further scale evolution — see ROADMAP.
 - **Avro + Schema Registry** is the wire contract. The `.avsc` is **copied per service** (same
   independent-services trade-off as `billing.proto`); each generates its own class via
   `avro-maven-plugin` (`stringType=String`). Confluent images run **KRaft** (no ZooKeeper).
