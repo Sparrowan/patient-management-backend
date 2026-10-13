@@ -104,10 +104,14 @@ public class OutboxRelay {
 
     /**
      * Maps the stored JSON payload to the right Avro record (by event type) and sends it to the
-     * single patient-events topic, keyed by {@code patientId} (the aggregate id). One topic + one
-     * key ⇒ one partition ⇒ strict order, so a delete can never overtake its register (splitting
-     * these across topics would break that — Kafka orders only within a topic-partition). Blocks on
-     * the broker ack so a failure is caught here rather than escaping asynchronously.
+     * single patient-events topic, keyed by {@code patientId} (the aggregate id). Kafka orders only
+     * within a topic-partition, and the default partitioner sends a given key to the same partition
+     * — so <em>same key ⇒ same partition ⇒ strict per-patient order</em>, and a delete can never
+     * overtake its register. Note what the guarantee does and does not rest on: it comes from the
+     * keying, <b>not</b> from the topic having a single partition, which is why the topic can be
+     * widened to parallelise consumers without weakening it. Splitting these event types across
+     * separate topics would break it. Blocks on the broker ack so a failure is caught here rather
+     * than escaping asynchronously.
      */
     private void publish(OutboxEvent event) throws Exception {
         Object record = switch (event.getEventType()) {
