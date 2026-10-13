@@ -74,6 +74,22 @@ public class OutboxEvent {
     @Column(nullable = false)
     private int attempts;
 
+    /**
+     * While set to a future instant, this row is claimed and other relays must skip it.
+     *
+     * <p>Durable state replaces what used to be a held row lock. The lock could only last as long as
+     * the claiming transaction, which forced the Kafka send to stay inside it; a lease survives the
+     * commit, so the send can happen outside any transaction. If the claimer dies, the lease simply
+     * expires and the row is retried — safe, because delivery is at-least-once by design and
+     * consumers are idempotent on {@code eventId}.
+     */
+    @Column
+    private Instant claimedUntil;
+
+    /** Identifies the rows won by one claim attempt, so they can be read back without a second lock. */
+    @Column(length = 36)
+    private String claimToken;
+
     /** Required by JPA. Use {@link #forPatientRegistered}. */
     protected OutboxEvent() {
     }
@@ -104,6 +120,18 @@ public class OutboxEvent {
     public static OutboxEvent forPatientDeleted(UUID patientId, String payloadJson, String traceParent) {
         return new OutboxEvent(
                 PATIENT_AGGREGATE, patientId, PATIENT_DELETED, PATIENT_EVENTS_TOPIC, payloadJson, traceParent);
+    }
+
+    /**
+     * Drops the claim, so the row is no longer reserved for one relay.
+     *
+     * <p>Called on both outcomes. On success it is tidiness — {@code published_at} already excludes
+     * the row from every claim predicate. On failure it is the point: without it the row would sit
+     * unretryable until its lease expired, turning a transient broker blip into minutes of delay.
+     */
+    public void releaseClaim() {
+        this.claimedUntil = null;
+        this.claimToken = null;
     }
 
     /** Marks the event as delivered to the broker (relay stamps this on a successful send). */

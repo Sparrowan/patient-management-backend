@@ -10,13 +10,11 @@ import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pm.events.PatientDeleted;
 import com.pm.events.PatientRegistered;
 import com.pm.patientservice.model.OutboxEvent;
-import com.pm.patientservice.repository.OutboxEventRepository;
 
 import io.micrometer.tracing.Span;
 import io.micrometer.tracing.Tracer;
@@ -37,22 +35,26 @@ import lombok.RequiredArgsConstructor;
  * <p>A per-row {@code try/catch} keeps one bad row from rolling back the rest of the batch; a
  * failed send just bumps {@code attempts} and leaves the row unpublished for the next tick.
  *
- * <p><b>Multi-instance safe.</b> The batch is claimed with a {@code SELECT … FOR UPDATE SKIP LOCKED}
- * (see {@link OutboxEventRepository#lockUnpublishedBatch}), so N relays across N replicas each grab a
- * disjoint batch and publish in parallel — no double-publish, no blocking <em>between relays</em>.
+ * <p><b>Multi-instance safe, without holding a lock across the network.</b> A batch is claimed by
+ * stamping a lease on it ({@link OutboxClaimer#claimBatch}) in a short, {@code READ_COMMITTED}
+ * transaction; the Kafka send then happens with <em>no transaction open</em>; each row is finally
+ * settled in its own short transaction. Two relays racing cannot both win a row — the claiming
+ * {@code UPDATE} is atomic, so the loser's predicate no longer matches.
  *
- * <p><b>Known defect: the claim also blocks writers.</b> The claim is held for the whole
- * {@code @Transactional}, Kafka send included. {@code SKIP LOCKED} only helps other readers taking the
- * same lock; the {@code WHERE published_at IS NULL} range scan takes <b>gap locks</b> under REPEATABLE
- * READ, which block <em>inserts into that range</em> — and an insert into that range is exactly what
- * registering a patient does. So a broker that is slow or unreachable makes every send burn
- * {@code SEND_TIMEOUT_SECONDS} holding those gaps, and registrations start failing with
- * {@code Lock wait timeout exceeded}. Measured: with the claim held, an insert blocked ~6s and then
- * timed out.
+ * <p><b>This replaced a real defect, worth recording so it is not reintroduced.</b> The claim used to
+ * be a {@code SELECT … FOR UPDATE SKIP LOCKED} held for the whole transaction, Kafka send included —
+ * because the lock <em>was</em> the claim, it had to outlive the send. But {@code SKIP LOCKED} only
+ * spares other readers taking the same lock, and under MariaDB's default REPEATABLE READ the
+ * {@code published_at IS NULL} range scan also takes <b>gap locks</b>, which block <em>inserts</em>
+ * into that range. Registering a patient inserts into exactly that range. So a slow or unreachable
+ * broker made each send burn its timeout holding those gaps, and {@code POST /patients} started
+ * failing with {@code Lock wait timeout exceeded} — measured at ~6s to block, then time out. An
+ * outbox exists precisely so the business transaction does not depend on the broker; that version
+ * inverted it.
  *
- * <p>That inverts the whole point of the outbox, which is that the business transaction must not
- * depend on the broker. The fix is to move the send outside the claiming transaction — claim and
- * commit, send, then stamp {@code published_at} in a second short transaction — tracked in ROADMAP.
+ * <p>Delivery remains <b>at-least-once</b>, and the failure windows are explicit: a crash between
+ * send and settle re-publishes that row when the lease expires, which consumers absorb because they
+ * are idempotent on {@code eventId}.
  *
  * <p>Polling (not CDC) is the deliberate starting point — simple, no extra infra. Debezium/CDC is the
  * scale evolution. See ROADMAP.
@@ -67,7 +69,7 @@ public class OutboxRelay {
     private static final long SEND_TIMEOUT_SECONDS = 5;
     private static final int BATCH_SIZE = 100;
 
-    private final OutboxEventRepository outboxRepository;
+    private final OutboxClaimer claimer;
     // Object value type: the relay publishes more than one Avro record type (PatientRegistered,
     // PatientDeleted). KafkaAvroSerializer serializes any SpecificRecord. Injected by name (there
     // are other KafkaTemplate<String,Object> beans for the consumer DLQ).
@@ -76,18 +78,30 @@ public class OutboxRelay {
     private final Tracer tracer;
     private final Propagator propagator;
 
+    /**
+     * Claim, publish, settle — deliberately <b>three</b> steps, with no transaction open across the
+     * Kafka send.
+     *
+     * <p>Note what is <em>not</em> transactional here: this method. Each step below has its own short
+     * transaction, and the send sits between them with none. That is the entire point — see the
+     * class javadoc for the lock-wait failure this replaced.
+     */
     @Scheduled(fixedDelayString = "${outbox.relay.poll-interval-ms:1000}")
-    @Transactional
     public void publishPending() {
-        List<OutboxEvent> batch = outboxRepository.lockUnpublishedBatch(BATCH_SIZE);
+        List<OutboxEvent> batch = claimer.claimBatch(BATCH_SIZE);
+        if (batch.isEmpty()) {
+            return;
+        }
         for (OutboxEvent event : batch) {
             try {
                 publishInOriginatingTrace(event);
-                event.markPublished();
+                claimer.settlePublished(event.getId());
             } catch (Exception e) {
-                event.recordFailedAttempt();
+                // Release the claim immediately rather than letting the lease run down: a transient
+                // broker error should be retried on the next tick, not held for the lease duration.
+                int attempts = claimer.settleFailed(event.getId());
                 log.warn("Outbox publish failed for event {} (attempt {}): {}",
-                        event.getId(), event.getAttempts(), e.toString());
+                        event.getId(), attempts, e.toString());
             }
         }
     }

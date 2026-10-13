@@ -19,23 +19,37 @@ import com.pm.patientservice.model.OutboxEvent;
 public interface OutboxEventRepository extends JpaRepository<OutboxEvent, UUID> {
 
     /**
-     * The next batch to publish: unpublished rows, oldest first, capped so one poll can't load an
-     * unbounded backlog. Backed by {@code idx_outbox_unpublished (published_at, created_at)}.
+     * Claims the next batch for publishing by stamping a lease on it, and returns how many rows were
+     * won. Pair with {@link #findByClaimToken} to read them back.
      *
-     * <p><b>Multi-instance safe</b> via a native {@code FOR UPDATE SKIP LOCKED}: relays on different
-     * replicas each claim a <em>disjoint</em> batch — a second relay <b>skips</b> the rows the first
-     * has locked rather than blocking on them or double-publishing them. The locks are held until the
-     * relay's {@code @Transactional} commits (after the Kafka send + the {@code publishedAt} stamp), so
-     * a claimed row is invisible to every other relay for its whole in-flight window.
+     * <p><b>The UPDATE itself is the claim</b> — atomic, so two relays racing cannot both win a row:
+     * the second sees {@code claimed_until} already in the future and its predicate no longer
+     * matches. This replaces the previous {@code SELECT … FOR UPDATE SKIP LOCKED}, where the held
+     * <em>lock</em> was the claim and therefore had to outlive the Kafka send.
      *
-     * <p>Native (not JPQL {@code @Lock}) because {@code SKIP LOCKED} + a row limit is a database-native
-     * concern — the explicit SQL is unambiguous and portable across the small set of engines we target,
-     * where the JPA {@code lock.timeout=-2} hint combined with {@code Pageable} did not apply the limit
-     * correctly.
+     * <p><b>Why that mattered.</b> Holding the claim across the send meant holding gap locks across
+     * the send: {@code WHERE published_at IS NULL} range-scans, and under REPEATABLE READ InnoDB
+     * gap-locks the scanned range, which blocks <em>inserts</em> into it. Registering a patient
+     * inserts into exactly that range, so a slow broker made registrations fail with lock-wait
+     * timeouts — the business transaction depending on the broker, which is the one thing an outbox
+     * exists to prevent. Now the claim commits in microseconds and the send happens outside any
+     * transaction.
+     *
+     * <p>Reclaims rows whose lease has expired, which is how a crashed relay's work is recovered.
+     * Re-publishing is safe: delivery is at-least-once by design and consumers are idempotent on
+     * {@code eventId}. Backed by {@code idx_outbox_claimable}.
      */
-    @Query(value = "SELECT * FROM outbox_events WHERE published_at IS NULL "
-            + "ORDER BY created_at ASC LIMIT :limit FOR UPDATE SKIP LOCKED", nativeQuery = true)
-    List<OutboxEvent> lockUnpublishedBatch(@Param("limit") int limit);
+    @Modifying
+    @Query(value = "UPDATE outbox_events SET claimed_until = :leaseUntil, claim_token = :token "
+            + "WHERE published_at IS NULL AND (claimed_until IS NULL OR claimed_until <= :now) "
+            + "ORDER BY created_at ASC LIMIT :limit", nativeQuery = true)
+    int claimBatch(@Param("token") String token, @Param("leaseUntil") Instant leaseUntil,
+            @Param("now") Instant now, @Param("limit") int limit);
+
+    /** The rows won by one {@link #claimBatch} call, oldest first — a point lookup on the token. */
+    @Query(value = "SELECT * FROM outbox_events WHERE claim_token = :token ORDER BY created_at ASC",
+            nativeQuery = true)
+    List<OutboxEvent> findByClaimToken(@Param("token") String token);
 
     /**
      * Deletes one bounded batch of already-published rows older than {@code cutoff}, oldest first.

@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -13,7 +14,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pm.events.PatientDeleted;
 import com.pm.events.PatientRegistered;
 import com.pm.patientservice.model.OutboxEvent;
-import com.pm.patientservice.repository.OutboxEventRepository;
 import io.micrometer.tracing.Span;
 import io.micrometer.tracing.Tracer;
 import io.micrometer.tracing.propagation.Propagator;
@@ -31,8 +31,13 @@ import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.support.SendResult;
 
 /**
- * Unit tests for the outbox relay in isolation — repository and Kafka are mocked, so these assert
- * the publish-then-mark control flow and the failure handling only.
+ * Unit tests for the outbox relay in isolation — the claimer and Kafka are mocked, so these assert
+ * the claim → publish → settle control flow and the failure handling only.
+ *
+ * <p>The relay no longer touches the repository or opens a transaction: settling is delegated to
+ * {@link OutboxClaimer}, precisely so no transaction spans the Kafka send. These tests therefore
+ * verify the <em>delegation</em>, and {@code OutboxClaimDoesNotBlockWritersTest} verifies the
+ * locking behaviour that delegation buys, against a real database.
  */
 @ExtendWith(MockitoExtension.class)
 @DisplayName("OutboxRelay")
@@ -41,7 +46,7 @@ class OutboxRelayTest {
     private static final UUID PATIENT_ID = UUID.fromString("22222222-2222-2222-2222-222222222222");
     private static final String TOPIC = "patient-events";
 
-    @Mock private OutboxEventRepository outboxRepository;
+    @Mock private OutboxClaimer claimer;
     @Mock private KafkaTemplate<String, Object> kafkaTemplate;
     @Spy private ObjectMapper objectMapper = new ObjectMapper();
     // Tracing collaborators: only exercised when a row carries a traceparent (see the restore test);
@@ -66,31 +71,31 @@ class OutboxRelayTest {
     @DisplayName("publishes an unpublished event keyed by patientId and marks it published")
     void publishesAndMarks() throws Exception {
         OutboxEvent event = pendingEvent();
-        when(outboxRepository.lockUnpublishedBatch(anyInt())).thenReturn(List.of(event));
+        when(claimer.claimBatch(anyInt())).thenReturn(List.of(event));
         CompletableFuture<SendResult<String, Object>> ok = CompletableFuture.completedFuture(null);
         when(kafkaTemplate.send(eq(TOPIC), eq(PATIENT_ID.toString()), any(PatientRegistered.class)))
                 .thenReturn(ok);
 
         relay.publishPending();
 
-        assertThat(event.isPublished()).isTrue();
-        assertThat(event.getAttempts()).isZero();
         verify(kafkaTemplate).send(eq(TOPIC), eq(PATIENT_ID.toString()), any(PatientRegistered.class));
+        verify(claimer).settlePublished(event.getId());
+        verify(claimer, never()).settleFailed(any());
     }
 
     @Test
     @DisplayName("routes a PatientDeleted row to the patient-events topic as a PatientDeleted record")
     void publishesDeletedEvent() throws Exception {
         OutboxEvent event = pendingDeletedEvent();
-        when(outboxRepository.lockUnpublishedBatch(anyInt())).thenReturn(List.of(event));
+        when(claimer.claimBatch(anyInt())).thenReturn(List.of(event));
         CompletableFuture<SendResult<String, Object>> ok = CompletableFuture.completedFuture(null);
         when(kafkaTemplate.send(eq("patient-events"), eq(PATIENT_ID.toString()), any(PatientDeleted.class)))
                 .thenReturn(ok);
 
         relay.publishPending();
 
-        assertThat(event.isPublished()).isTrue();
         verify(kafkaTemplate).send(eq("patient-events"), eq(PATIENT_ID.toString()), any(PatientDeleted.class));
+        verify(claimer).settlePublished(event.getId());
     }
 
     @Test
@@ -99,7 +104,7 @@ class OutboxRelayTest {
         String payload = objectMapper.writeValueAsString(new PatientRegisteredPayload(
                 UUID.randomUUID().toString(), PATIENT_ID.toString(), "USD", 1_700_000_000_000L, "actor"));
         OutboxEvent event = OutboxEvent.forPatientRegistered(PATIENT_ID, payload, "00-trace-span-01");
-        when(outboxRepository.lockUnpublishedBatch(anyInt())).thenReturn(List.of(event));
+        when(claimer.claimBatch(anyInt())).thenReturn(List.of(event));
         when(kafkaTemplate.send(anyString(), anyString(), any(PatientRegistered.class)))
                 .thenReturn(CompletableFuture.completedFuture(null));
         // Restore chain: propagator.extract(...).name(...).start() -> span; tracer.withSpan(span) -> scope.
@@ -112,7 +117,7 @@ class OutboxRelayTest {
 
         relay.publishPending();
 
-        assertThat(event.isPublished()).isTrue();
+        verify(claimer).settlePublished(event.getId());
         verify(propagator).extract(any(), any()); // the stored context was restored
         verify(span).end();                       // and its span was closed after the send
     }
@@ -121,14 +126,16 @@ class OutboxRelayTest {
     @DisplayName("on a broker failure, leaves the event unpublished and records the attempt")
     void recordsFailure() throws Exception {
         OutboxEvent event = pendingEvent();
-        when(outboxRepository.lockUnpublishedBatch(anyInt())).thenReturn(List.of(event));
+        when(claimer.claimBatch(anyInt())).thenReturn(List.of(event));
         CompletableFuture<SendResult<String, Object>> failed = new CompletableFuture<>();
         failed.completeExceptionally(new RuntimeException("broker down"));
         when(kafkaTemplate.send(anyString(), anyString(), any(PatientRegistered.class))).thenReturn(failed);
 
         relay.publishPending();
 
-        assertThat(event.isPublished()).isFalse();
-        assertThat(event.getAttempts()).isEqualTo(1);
+        // A failed send must settle as a failure -- which releases the claim, so the next tick
+        // retries immediately instead of waiting out the lease.
+        verify(claimer).settleFailed(event.getId());
+        verify(claimer, never()).settlePublished(any());
     }
 }
