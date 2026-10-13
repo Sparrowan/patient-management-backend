@@ -70,6 +70,19 @@ com.pm.<service>/
 - **Primary keys**: `UUID` with `@GeneratedValue(strategy = GenerationType.UUID)`. On MariaDB
   10.7+ this maps to the **native `UUID` column type** (what Hibernate's MariaDBDialect
   validates against) — Flyway migrations use `id UUID`, not `BINARY(16)`.
+- **Migration versions are a shared namespace git cannot referee.** Two branches can each add
+  `V12__…`, merge cleanly, and fail only at application start-up. `scripts/check-migration-versions.sh`
+  catches duplicates per service at PR time. **Kept sequential rather than switching to timestamps**:
+  timestamps make collisions impossible but make *out-of-order* merges silent, and an untested apply
+  order in production is worse than a loud failure in CI. Revisit if several people work this schema
+  at once.
+- **Never apply a branch's migrations to the long-lived dev database.** If the branch was cut before
+  another migration merged, that database ends up holding a *later* version while missing an earlier
+  one — a state no branch can reproduce, and `validate` then refuses to start every build
+  (`Detected resolved migration not applied to database: N`). Timestamp versioning would not help;
+  the cause is the apply order, not the naming. The Testcontainers suite is already correct here (a
+  fresh database per run, applied in order) — the gap is manual Docker verification, so verify
+  branch migrations against a throwaway volume and reset the dev schema afterwards.
 - **Schema authority is Flyway**, not Hibernate. `spring.jpa.hibernate.ddl-auto=validate`
   (or `none`) in every service. Migrations live in `src/main/resources/db/migration/`,
   named `V<n>__<description>.sql`.
