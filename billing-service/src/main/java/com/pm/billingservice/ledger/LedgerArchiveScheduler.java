@@ -19,7 +19,16 @@ public class LedgerArchiveScheduler {
     private final LedgerArchiveWorker worker;
 
     /** Daily by default: the hot window is months wide, so there is nothing to gain from sweeping often. */
-    @Scheduled(fixedDelayString = "${ledger.archive.sweep-interval-ms:86400000}")
+    /**
+     * <b>Why an initial delay.</b> {@code fixedDelay} with no initial delay runs the moment the
+     * context starts, so a rolling deploy of N replicas fires N sweeps at once — and start-up is
+     * precisely when the service is busiest filling caches and pools. The work is safe to duplicate
+     * (claimed or idempotent), so this is not a correctness fix; it keeps a deploy from coinciding
+     * with the heaviest background job in the service. Pollers deliberately get none: delaying them
+     * delays the work itself.
+     */
+    @Scheduled(fixedDelayString = "${ledger.archive.sweep-interval-ms:86400000}",
+            initialDelayString = "${ledger.archive.initial-delay-ms:300000}")
     public void sweep() {
         worker.archiveExpired();
     }

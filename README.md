@@ -116,9 +116,9 @@ docker compose up --build
 |--------------------------|------------------------------------------------------------|
 | `http://localhost:4004`  | **api-gateway** — the single entry point clients use       |
 | `http://localhost:4000`  | patient-service (direct; normally reached via the gateway) |
-| `http://localhost:4001`  | billing-service (direct) — gRPC on `:9001`                 |
-| `http://localhost:4002`  | auth-service (direct)                                      |
-| `http://localhost:4003`  | analytics-service (direct)                                 |
+| `http://localhost:4010`  | billing-service (direct) — gRPC on `:9010`                 |
+| `http://localhost:4020`  | auth-service (direct)                                      |
+| `http://localhost:4030`  | analytics-service (direct)                                 |
 | `http://localhost:8080`  | kafka-ui — topics, messages, Avro schemas, DLQ             |
 | `http://localhost:8081`  | schema-registry                                            |
 | `http://localhost:9090`  | Prometheus                                                 |
@@ -152,6 +152,25 @@ analytics-service projects it into its read models — **guaranteed** (survives 
 deleted); an **empty** account → billing closes it and the patient is soft-deleted; billing down →
 **503**. So the loop is: *credit an account → DELETE → 409 → debit to zero → DELETE → 204 (closed).*
 A `PatientDeleted` event is still emitted as fan-out (visible in kafka-ui at `http://localhost:8080`).
+
+### Running more than one instance of a service
+
+```bash
+# patient-service declares the Kafka topic, so start it FIRST — if a consumer subscribes before the
+# producer boots, the broker auto-creates patient-events at one partition and the declared width is
+# only applied once the owner starts.
+docker compose up -d patient-service
+
+docker compose up -d --no-recreate --scale billing-service=3 billing-service
+docker exec kafka kafka-consumer-groups --bootstrap-server kafka:9092 \
+  --describe --group billing-service     # one partition per replica
+```
+
+Two compose behaviours that cost time if you don't know them: app services deliberately carry **no
+`container_name`** and publish **port ranges** rather than fixed ports, because both forbid
+`--scale`; and a later `docker compose up` *without* `--scale` silently scales the service back to
+one, so pass `--no-recreate` when adding replicas to a running stack. Reach a scaled service through
+the **gateway on :4004** — that is the stable address, and the only one production would publish.
 
 ### Running a single service locally (no Docker)
 

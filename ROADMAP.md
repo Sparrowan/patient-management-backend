@@ -390,15 +390,20 @@ system. The relationships are the findings:
       hazards: partitions can be added but never removed, and adding them re-maps keys to partitions,
       so one aggregate's events can briefly land out of order across the change. **Blocks every other
       multi-instance experiment**, so it goes first.
-- [ ] **B — Scheduler start-up herd + explicit pool config.** `@Scheduled(fixedDelay=…)` with no
-      initial delay runs immediately on context start, so a rolling deploy of N replicas fires N
-      simultaneous sweeps (outbox relay, outbox retention, payout saga, idempotency sweep, ledger
-      archival). Safe here — each is `SKIP LOCKED`-claimed or idempotent — but it is a thundering herd
-      that scales with replica count; add an initial delay plus jitter. Then declare the Hikari pool
-      explicitly rather than inheriting the default 10, and write the ceiling down:
-      `replicas × pool_max < max_connections − headroom` → **~14 instances per database** at 10/151
-      today. Exhaustion presents as acquisition timeouts, which read like a slow database.
-      Must land before C, so the write-path test measures a pool we chose.
+- [x] **B — Scheduler and connection-pool sizing.** DONE. Three findings, two worse than planned.
+      **(1)** The scheduler pool was **one thread** (measured, not assumed) — every `@Scheduled` job
+      in a service serialised behind the slowest, so billing's ledger archive sweep (up to 10,000
+      rows) blocked the payout saga worker that settles money every 2s. **(2)** The
+      `spring.datasource.hikari.*` properties added here were **inert** in patient-service: they bind
+      to Boot's *auto-configured* DataSource, which read/write splitting had replaced with hand-built
+      beans — so both pools silently ran Hikari's own defaults whatever the file said. Caught only
+      because the test asserts the live bean rather than the file. **(3)** The connection ceiling was
+      **half** what this plan recorded: patient-service holds *two* pools (primary + replica), so 20
+      connections per instance, ~7 instances per DB — not 14. Now 8 + 6 = 14 (~10 instances), pools
+      named separately in Prometheus, 3s acquisition timeout so exhaustion fails fast instead of
+      piling up, and sweeps given an initial delay so a rolling deploy does not fire every heavy job
+      at once. Pollers deliberately get none. Compose also made genuinely scalable (`container_name`
+      and fixed host ports both forbid `--scale`), verified at 3 replicas with one partition each.
 - [ ] **C — Write-path load testing.** Where the real ceiling lives, and it is the money path. The
       experiment that isolates it: **credits against one account vs spread across many** — same total
       load, and the difference is purely pessimistic-lock contention on `SELECT … FOR UPDATE`. If

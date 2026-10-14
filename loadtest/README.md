@@ -18,7 +18,7 @@ docker run --rm -i -v "$PWD/loadtest:/scripts" \
   grafana/k6 run --quiet --summary-export=/scripts/control.json /scripts/control.js
 
 # A real read: JWT-verified, cache-backed.
-TOKEN=$(curl -s -X POST http://localhost:4002/api/v1/auth/login \
+TOKEN=$(curl -s -X POST http://localhost:4020/api/v1/auth/login \
   -H 'Content-Type: application/json' \
   -d '{"usernameOrEmail":"admin","password":"password"}' | jq -r .accessToken)
 

@@ -35,9 +35,14 @@ patient-management/
 └── docker-compose.yml   # root orchestration: every service + a DB container each + Kafka/SR
 ```
 
-**Ports:** gateway `:4004` (the single entry point clients use), patient `:4000`, billing `:4001`
-(+ gRPC `:9001`), auth `:4002`, analytics `:4003`; kafka-ui `:8080`, schema-registry `:8081`,
-Prometheus `:9090`, Jaeger UI `:16686`.
+**Ports:** gateway `:4004` (the single entry point clients use, and the only fixed app port),
+patient `:4000`, billing `:4010` (+ gRPC `:9010`), auth `:4020`, analytics `:4030`; kafka-ui
+`:8080`, schema-registry `:8081`, Prometheus `:9090`, Jaeger UI `:16686`.
+
+App services publish **port ranges** (e.g. `4000-4003:4000`) and carry **no `container_name`** —
+both of those forbid `docker compose --scale`, and the old adjacent ports left no room for a
+contiguous range. Each replica takes the next host port; a scaled service is reached through the
+gateway. `docker compose up` without `--scale` silently scales back to one, so use `--no-recreate`.
 
 Each service holds its own copy of `billing.proto` under `src/main/proto/` and generates its own
 stubs — a deliberate trade-off to keep services independently buildable (no shared module / no

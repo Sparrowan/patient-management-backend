@@ -184,7 +184,6 @@ services:
     build:
       context: ./patient-service
     image: patient-management/patient-service:latest
-    container_name: patient-service
     depends_on:
       patient-service-db:
         condition: service_healthy
@@ -224,7 +223,7 @@ services:
       # Export trace spans (OTLP/HTTP) to the Jaeger container.
       OTLP_TRACING_ENDPOINT: http://jaeger:4318/v1/traces
     ports:
-      - "4000:4000"
+      - "4000-4003:4000"
     networks:
       - patient-net
 
@@ -252,7 +251,6 @@ services:
     build:
       context: ./billing-service
     image: patient-management/billing-service:latest
-    container_name: billing-service
     depends_on:
       billing-service-db:
         condition: service_healthy
@@ -274,8 +272,8 @@ services:
       # Export trace spans (OTLP/HTTP) to the Jaeger container.
       OTLP_TRACING_ENDPOINT: http://jaeger:4318/v1/traces
     ports:
-      - "4001:4001"
-      - "9001:9001"   # gRPC (synchronous API; published for host debugging)
+      - "4010-4013:4001"
+      - "9010-9013:9001"   # gRPC (synchronous API; published for host debugging)
     networks:
       - patient-net
 
@@ -303,7 +301,6 @@ services:
     build:
       context: ./auth-service
     image: patient-management/auth-service:latest
-    container_name: auth-service
     depends_on:
       auth-service-db:
         condition: service_healthy
@@ -316,7 +313,7 @@ services:
       # Export trace spans (OTLP/HTTP) to the Jaeger container.
       OTLP_TRACING_ENDPOINT: http://jaeger:4318/v1/traces
     ports:
-      - "4002:4002"
+      - "4020-4023:4002"
     networks:
       - patient-net
 
@@ -394,7 +391,6 @@ services:
     build:
       context: ./analytics-service
     image: patient-management/analytics-service:latest
-    container_name: analytics-service
     depends_on:
       analytics-service-db:
         condition: service_healthy
@@ -416,7 +412,7 @@ services:
       # Export trace spans (OTLP/HTTP) to the Jaeger container.
       OTLP_TRACING_ENDPOINT: http://jaeger:4318/v1/traces
     ports:
-      - "4003:4003"
+      - "4030-4033:4003"
     networks:
       - patient-net
 
