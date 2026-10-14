@@ -82,5 +82,22 @@ public abstract class AbstractIntegrationTest {
         // Turn off the outbox retention tick so it can't prune rows a test just set up; the retention
         // test drives the worker directly.
         registry.add("outbox.retention.enabled", () -> "false");
+        // Kafka is NOT part of these tests, and must not be reachable from them. Left alone, the
+        // context resolves spring.kafka.bootstrap-servers to its localhost:9092 default — a real
+        // broker, if one happens to be running — and then: the listener joins the PRODUCTION
+        // consumer group (n/a — producer only), stealing partitions from the running service and committing
+        // offsets on its behalf; auto-offset-reset=earliest replays the whole topic into this test
+        // database; and KafkaAdmin provisions topics on that broker. A suite should not be able to
+        // perturb a running system. Pointing at a closed port fails fast (connection refused, not a
+        // timeout) and auto-startup=false means no consumer group is joined at all. The event paths
+        // are covered by driving the consumer/projector directly, which needs no broker.
+        registry.add("spring.kafka.bootstrap-servers", () -> "localhost:1");
+        registry.add("spring.kafka.listener.auto-startup", () -> "false");
+        // And the outbox relay's tick. Not cosmetic: its claim query gap-locks the unpublished
+        // range for the duration of its Kafka send, so against an unreachable broker it blocks the
+        // very INSERT a registration performs, and POST /patients fails with a lock-wait timeout.
+        // See the known defect on OutboxRelay. The relay's own behaviour is covered by its unit test
+        // and by OutboxSkipLockedIntegrationTest, which drive it directly.
+        registry.add("outbox.relay.enabled", () -> "false");
     }
 }

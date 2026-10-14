@@ -366,6 +366,21 @@ system. The relationships are the findings:
 
 ### The arcs, in dependency order
 
+- [x] **A.1 — Move the Kafka send out of the outbox relay's claiming transaction.** DONE. Found while
+      isolating the test suites, and it is a genuine defect rather than a test artifact. The relay
+      claims its batch with `SELECT … WHERE published_at IS NULL … FOR UPDATE SKIP LOCKED` and holds
+      that claim for the whole `@Transactional`, Kafka send included. `SKIP LOCKED` only spares other
+      readers taking the same lock; the range scan takes **gap locks** under REPEATABLE READ, which
+      block *inserts into the range* — and inserting into that range is precisely what registering a
+      patient does. So a slow or unreachable broker makes each send burn `SEND_TIMEOUT_SECONDS`
+      holding those gaps, and `POST /patients` starts failing with `Lock wait timeout exceeded`.
+      **Measured:** with the claim held, a competing insert blocked ~6s and then timed out; the
+      patient suite reproduced it as two 500s. This inverts the outbox pattern's entire purpose —
+      the business transaction must not depend on the broker. Fix: claim and commit, send outside any
+      transaction, then stamp `published_at` in a second short transaction. Re-publishing on a crash
+      between the two is already safe (consumers are idempotent on `eventId`), so at-least-once is
+      preserved. Worth doing before C, since write-path load testing will hit this.
+
 - [ ] **A — Kafka partitions + multi-instance consumer proof.** `patient-events` has
       **`PartitionCount: 1`** today, so consumer parallelism in a group is 1 *regardless of replica
       count* — scale `billing-service` to ten and nine sit idle. The most dangerous class of scaling

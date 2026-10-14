@@ -71,5 +71,16 @@ public abstract class AbstractIntegrationTest {
         registry.add("idempotency.retention.enabled", () -> "false");
         // And the ledger archive sweep: a tick mid-test would move rows out from under a fixture.
         registry.add("ledger.archive.enabled", () -> "false");
+        // Kafka is NOT part of these tests, and must not be reachable from them. Left alone, the
+        // context resolves spring.kafka.bootstrap-servers to its localhost:9092 default — a real
+        // broker, if one happens to be running — and then: the listener joins the PRODUCTION
+        // consumer group (billing-service), stealing partitions from the running service and committing
+        // offsets on its behalf; auto-offset-reset=earliest replays the whole topic into this test
+        // database; and KafkaAdmin provisions topics on that broker. A suite should not be able to
+        // perturb a running system. Pointing at a closed port fails fast (connection refused, not a
+        // timeout) and auto-startup=false means no consumer group is joined at all. The event paths
+        // are covered by driving the consumer/projector directly, which needs no broker.
+        registry.add("spring.kafka.bootstrap-servers", () -> "localhost:1");
+        registry.add("spring.kafka.listener.auto-startup", () -> "false");
     }
 }
