@@ -19,7 +19,16 @@ public class IdempotencyRetentionScheduler {
 
     private final IdempotencyRetentionWorker worker;
 
-    @Scheduled(fixedDelayString = "${idempotency.retention.sweep-interval-ms:3600000}")
+    /**
+     * <b>Why an initial delay.</b> {@code fixedDelay} with no initial delay runs the moment the
+     * context starts, so a rolling deploy of N replicas fires N sweeps at once — and start-up is
+     * precisely when the service is busiest filling caches and pools. The work is safe to duplicate
+     * (claimed or idempotent), so this is not a correctness fix; it keeps a deploy from coinciding
+     * with the heaviest background job in the service. Pollers deliberately get none: delaying them
+     * delays the work itself.
+     */
+    @Scheduled(fixedDelayString = "${idempotency.retention.sweep-interval-ms:3600000}",
+            initialDelayString = "${idempotency.retention.initial-delay-ms:120000}")
     public void tick() {
         worker.sweepExpired();
     }
