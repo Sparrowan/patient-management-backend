@@ -404,12 +404,25 @@ system. The relationships are the findings:
       piling up, and sweeps given an initial delay so a rolling deploy does not fire every heavy job
       at once. Pollers deliberately get none. Compose also made genuinely scalable (`container_name`
       and fixed host ports both forbid `--scale`), verified at 3 replicas with one partition each.
-- [ ] **C — Write-path load testing.** Where the real ceiling lives, and it is the money path. The
-      experiment that isolates it: **credits against one account vs spread across many** — same total
-      load, and the difference is purely pessimistic-lock contention on `SELECT … FOR UPDATE`. If
-      single-account throughput stays flat while many-account scales, the ceiling is the lock, not
-      CPU — which is the shape of a hot account on payday. Correlate with the HikariCP and JVM
-      metrics already on `/actuator/prometheus`, then do the sizing arithmetic.
+- [x] **C — Write-path load testing.** The experiment ran (`loadtest/write.js`,
+      `contention-sweep.sh`, one account vs many) and **found a defect before it found a ceiling**:
+      12 concurrent credits to one account returned 4×200 and **8×500**. `credit`/`debit` ran at
+      MariaDB's default REPEATABLE READ, where a `SELECT … FOR UPDATE` on a row a concurrent
+      transaction has already committed fails with error 1020 rather than waiting — so the
+      pessimistic lock made concurrent movements *error* instead of serialize, and a 500 is the one
+      status the idempotency layer won't cache, leaving the caller unsure whether money moved.
+      `Transfer` and `Payout` already set `READ_COMMITTED`; the oldest money path never did, and the
+      only concurrency test covered lock *ordering*, not contention on one row. Fixed +
+      `ConcurrentMoneyMovementIntegrationTest` (verified failing at 8/10 → 500 without the fix).
+      **The ceiling hypothesis was wrong**, which is the more interesting result: one account
+      *outperformed* sixteen (210/s vs 116/s at 16 concurrent) because one hot row stays in InnoDB's
+      buffer pool. The lock is held for a fraction of a ~14ms request, so below ~16 concurrent
+      writers it is not the constraint; above 32 it is, showing up as latency (19 → 105 → 149ms at
+      flat throughput), not errors. ~200 credits/sec/account on this host. Also learned: the laptop
+      can't be trusted for write throughput — load average hit **28 on 8 cores** while billing used
+      1.6% CPU, so the rig swamped the signal and **per-request latency, not throughput, is the
+      readable metric** for queueing. And port ranges from Arc B mean host ports are no longer
+      predictable, so the scripts now discover them (`ports.sh`).
 - [ ] **D — Circuit breaker on the synchronous veto.** Resilience4j was removed with the old gRPC
       client when registration moved to Kafka, and `CloseAccountForPatient` never got it back. The 3s
       deadline bounds one call, but under a billing brownout *every* delete waits the full three
