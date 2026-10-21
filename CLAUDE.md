@@ -282,6 +282,26 @@ com.pm.<service>/
     returns `FAILED_PRECONDITION` for a funded one → patient returns **409** (settle first); billing
     unreachable → **503** (fail safe — block the delete). The veto runs *before* the local
     soft-delete, so a rejection leaves the patient untouched — no delete-then-restore flip-flop.
+  - **A synchronous veto needs a circuit breaker, and a deadline is not one.** The gRPC deadline
+    bounds one call; it does nothing about the hundredth, and each stalled call holds a servlet
+    worker *and* an open transaction, so a slow dependency becomes *this* service's thread
+    exhaustion and spreads to endpoints that never touch it. Resilience4j `@CircuitBreaker` on
+    `BillingGrpcClient` (needs `spring-boot-starter-aop`, or the annotation is silently inert).
+    Three rules that are correctness, not tuning:
+    - **An open breaker must fail safe.** "No answer" is never "no objection" — the fallback still
+      refuses the delete (503). A breaker that defaulted to allow would let a funded patient be
+      deleted during an outage.
+    - **Business rejections must not count as failures** (`ignore-exceptions`). A funded account is
+      the dependency working *correctly*; counting it opens the breaker on legitimate 409s and tells
+      clients to retry a request that can never succeed.
+    - **Configure a slow-call threshold, not just a failure rate.** Calls that take 2.9s and
+      *succeed* never time out, so a failure-rate-only breaker stays closed while every worker
+      blocks. Set it well above the healthy path and below the deadline (here: 1s, healthy ~30ms,
+      deadline 3s).
+  - **Measure the right outage.** A *stopped* dependency refuses the TCP connection and already
+    fails in ~10–20ms — a breaker adds nothing. The expensive case is a **brownout** (reachable, not
+    answering: `docker pause`), which stalls for the full deadline on every call. Test with a pause,
+    not a kill, or the experiment will show the breaker is unnecessary.
   - **Consequences / fan-out** ("X happened, others may react") stay **asynchronous events**.
     Registering a patient is async (outbox → `PatientRegistered` → billing opens the account —
     decoupled, resilient); `PatientDeleted` is emitted **fan-out only** (analytics/audit/future) —
@@ -533,17 +553,27 @@ compilation problems` / `No qualifying bean of type PatientMapper` at startup). 
       payout **halts** the cutoff rather than being skipped past — self-healing, and it keeps the
       prefix intact. Safe because `BillingAccount.balance` is a **materialized** column: had it been a
       `SUM()` over the ledger, archiving would silently move money.
-- [ ] Next — **scale hardening**, sequenced in ROADMAP ("Scale-readiness plan"), after a load test
-      + architecture audit. Headline finding: a JWT-verified cached read hits **78% of the throughput
-      of a no-op endpoint**, so the app is cheap and the host is the constraint — but three things
-      will not improve by adding machines. **(A)** `patient-events` has **one partition**, so consumer
-      parallelism is 1 regardless of replica count; the fix is small but it **blocks every other
-      multi-instance experiment**. **(B)** Schedulers fire on every instance at start-up (a
-      deploy-time herd) and the Hikari pool is the undeclared default 10 — `replicas × pool_max <
-      max_connections` caps at ~14 instances per DB. **(C)** The write path's real ceiling is
-      pessimistic-lock contention, not CPU — measure it with credits to one account vs many. Sharding
-      is deliberately **not** being built: residency across the target markets forces per-country
-      deployments, which hands you country as a shard key.
+- [x] **Scale hardening** (arcs A–D of ROADMAP's "Scale-readiness plan"), driven by a load test +
+      architecture audit. The starting finding: a JWT-verified cached read hits **78% of the
+      throughput of a no-op endpoint**, so the app is cheap and the host is the constraint — but four
+      things would not have improved by adding machines.
+      **(A)** `patient-events` had **one partition**, capping consumer parallelism at 1 regardless of
+      replica count — and it blocked every other multi-instance experiment. Now 3, with the DLT
+      matched (`DeadLetterPublishingRecoverer` reuses the failed partition number, so a narrower DLT
+      silently drops dead letters).
+      **(B)** Spring's default scheduler pool is **1 thread**, so billing's ledger sweep blocked the
+      payout worker that settles money every 2s; and `spring.datasource.hikari.*` was **inert** in
+      patient-service because it hand-builds its DataSources — the real budget was 20 connections per
+      instance, not 10. Both now explicit and asserted against the live beans.
+      **(C)** The write path's ceiling turned out **not** to be lock contention below ~16 concurrent
+      writers — one hot account *outperformed* sixteen, since one row stays in the buffer pool. It
+      binds above that, as latency (19 → 105 → 149ms at flat throughput), ~200 credits/sec/account.
+      The load test's real find was a **defect**: `credit`/`debit` returned 500s under concurrency
+      (MariaDB 1020) for want of `READ_COMMITTED`.
+      **(D)** The gRPC veto had a deadline but no breaker, so a billing **brownout** stalled every
+      delete ~3.1s and would have exhausted the servlet pool. Now ~10ms when open.
+      Sharding is deliberately **not** being built: residency across the target markets forces
+      per-country deployments, which hands you country as a shard key.
 - [ ] Also pending: CDC (Debezium); a **reconciliation job** (register→delete orphan,
       `FAILED`/ambiguous payouts via a rail status-query, closed-account-mid-reversal edge) — now
       load-bearing, since a parked `FAILED` payout halts ledger archival at its timestamp. Background
