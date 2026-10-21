@@ -423,11 +423,25 @@ system. The relationships are the findings:
       1.6% CPU, so the rig swamped the signal and **per-request latency, not throughput, is the
       readable metric** for queueing. And port ranges from Arc B mean host ports are no longer
       predictable, so the scripts now discover them (`ports.sh`).
-- [ ] **D — Circuit breaker on the synchronous veto.** Resilience4j was removed with the old gRPC
-      client when registration moved to Kafka, and `CloseAccountForPatient` never got it back. The 3s
-      deadline bounds one call, but under a billing brownout *every* delete waits the full three
-      seconds. Cross-region that coupling gets considerably more expensive. Prove it by killing
-      billing and watching the breaker open — fast 503 instead of a 3s stall.
+- [x] **D — Circuit breaker on the synchronous veto.** Resilience4j (standalone
+      `resilience4j-spring-boot3`, not the Spring Cloud variant — this service has no Spring Cloud
+      BOM) now guards `CloseAccountForPatient`. Measured before building anything, and the premise
+      needed correcting: **"kill billing" is the wrong experiment.** A *stopped* billing refuses the
+      TCP connection, so gRPC returns `UNAVAILABLE` in **9–22ms** — already fast, nothing for a
+      breaker to improve. The 3s stall needs a **brownout**: `docker pause`, so TCP connects and
+      nothing answers. There, six consecutive deletes each paid the full deadline (~3.0–3.2s, no
+      learning), and each one holds a Tomcat worker plus an open transaction — so a billing brownout
+      becomes patient-service thread exhaustion that spreads to endpoints which never touch billing.
+      With the breaker: trips after 3 calls and then **~10ms instead of ~3,100ms, a 300×
+      improvement**; full `closed → open → half_open → closed` lifecycle verified live on
+      `/actuator/prometheus`, deletes resuming automatically. It tripped on **3** rather than the
+      configured 5 because the **slow-call** rule (50% over 1s) fired first — which is the point of
+      having it: calls that take 2.9s and *succeed* never time out, so a deadline alone would let a
+      brownout exhaust the pool with the breaker still closed. Two correctness constraints: the
+      fallback rethrows `PatientDeletionConflictException` so a **funded account stays a 409, not a
+      503** (verified: 6 rejections counted `ignored`, 0 `failed`, breaker stayed closed), and an
+      open breaker **fails safe** — it refuses the delete rather than reading "no answer" as "billing
+      has no objection", which would let a funded patient be deleted.
 - [ ] **E — Sharding: a decision record, not an implementation.** Deliberately *not* building it.
       Data residency across the target markets forces per-country deployments anyway, which hands you
       **country as a shard key** — a general sharding layer would solve a problem the regulator already
