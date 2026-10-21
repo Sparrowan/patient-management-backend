@@ -99,6 +99,30 @@ com.pm.<service>/
 - **Locking**: optimistic (`@Version`) is the default everywhere. **Money-movement paths take a
   pessimistic write lock** (`@Lock(PESSIMISTIC_WRITE)` → `SELECT ... FOR UPDATE`) on the account
   so concurrent credits/debits serialize instead of 409-ing on the version check.
+- **A non-locking read before `SELECT … FOR UPDATE` requires `READ_COMMITTED`.** MariaDB **error
+  1020** ("Record has changed since last read") needs three things in one REPEATABLE READ
+  transaction: a **non-locking** read of a row, a concurrent commit to that row, then `FOR UPDATE`
+  on it. The locking read then *fails outright* instead of waiting — so the pessimistic lock does
+  the opposite of its job: concurrent movements **error** rather than serialize, and the caller gets
+  a **500**, the one status the idempotency layer deliberately does not cache, so a client is told
+  "unknown" about money. Any such method **must** declare
+  `@Transactional(isolation = Isolation.READ_COMMITTED)`; it is not a tuning choice. Verified in SQL
+  both ways: snapshot-read → concurrent update → locking read fails 1020, while locking-read →
+  concurrent update → locking read merely blocks and succeeds.
+  - **Which paths have the shape:** `credit`/`debit`, `Transfer.transfer` and `Payout.initiate` all
+    do an idempotency-key lookup (a plain read) *before* locking the account. `Transfer` and
+    `Payout` already set the isolation — they hit 1020 while being written — and `credit`/`debit`,
+    the oldest and most-used path, did not. `PayoutSagaWorker` takes the same lock with no isolation
+    override and is **fine**, because `claimDuePending` is itself `FOR UPDATE SKIP LOCKED` and the
+    account is never read before being locked. So the rule keys on *read ordering*, not on "is this
+    a money path".
+  - **A concurrency test must force the collision**: same row, ≥10 simultaneous writers. Spread the
+    load across distinct rows and every assertion passes while the bug sits there — the same trap
+    the outbox claim-lease test first fell into. Found by load test, not by the suite; see
+    `ConcurrentMoneyMovementIntegrationTest` and `loadtest/README.md`. Corollary: a test that cannot
+    fail is not worth keeping — a regression test written for the payout worker passed against the
+    unfixed code, which is how the audit above established the path was *already* safe; the reasoning
+    lives in that method's javadoc instead.
 - **Relationships & N+1**: prefer **ID references** (a `UUID` field + DB FK) over JPA associations
   across aggregates — no lazy navigation, no N+1 (e.g. `LedgerEntry.accountId`, not
   `@ManyToOne`). Where an association *is* modeled, keep it `LAZY` (override `@ManyToOne`'s EAGER

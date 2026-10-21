@@ -28,6 +28,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Limit;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
@@ -71,15 +72,41 @@ public class BillingAccountServiceImpl implements BillingAccountService {
         return accountMapper.toResponse(accountRepository.save(account));
     }
 
+    /**
+     * {@code READ_COMMITTED}, for the same reason as {@link TransferServiceImpl} and
+     * {@link PayoutServiceImpl} — and this path was the one that did <em>not</em> have it.
+     *
+     * <p>Error 1020 ("Record has changed since last read") needs three things in one REPEATABLE READ
+     * transaction: a <b>non-locking</b> read of a row, a concurrent commit to that row, then
+     * {@code FOR UPDATE} on it. {@code applyMovement} has exactly that shape — the
+     * {@code ledgerLookup} idempotency check is a plain read that opens the snapshot, and the account
+     * is locked afterwards. So the pessimistic lock, which was supposed to make concurrent movements
+     * <em>serialize</em>, made them <b>error</b> instead.
+     *
+     * <p>Confirmed in SQL both ways: snapshot-read → concurrent update → locking read fails with
+     * 1020, whereas locking-read → concurrent update → locking read merely blocks and succeeds. That
+     * second shape is why {@code PayoutSagaWorker} is <em>not</em> affected despite also taking this
+     * lock without {@code READ_COMMITTED} — it never reads a row before locking it.
+     *
+     * <p><b>Found by load test, not by the suite.</b> Twelve concurrent credits to one account
+     * returned 4×200 and 8×<b>500</b>. It survived this long because the two paths that move money
+     * between accounts were written later, hit 1020 during development, and were fixed — while
+     * credit/debit, the oldest and most-used path, had no concurrent-same-account test at all. A
+     * contended single account is the normal production shape (payroll out of one corporate account,
+     * a utility's collection account on a due date), so this was a latent outage, and a 500 is the
+     * worst possible answer here: it is the one status the idempotency layer deliberately does not
+     * cache, so the caller is told "unknown" about a money movement.
+     */
     @Override
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public LedgerEntryResponseDTO credit(
             UUID accountId, MoneyMovementRequestDTO request, String idempotencyKey) {
         return applyMovement(accountId, request, idempotencyKey, EntryType.CREDIT);
     }
 
+    /** Same isolation, same reason as {@link #credit} — both land in {@code applyMovement}. */
     @Override
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public LedgerEntryResponseDTO debit(
             UUID accountId, MoneyMovementRequestDTO request, String idempotencyKey) {
         return applyMovement(accountId, request, idempotencyKey, EntryType.DEBIT);

@@ -75,6 +75,28 @@ public class PayoutSagaWorker {
     private final LedgerEntryRepository ledgerRepository;
     private final ObservationRegistry observationRegistry;
 
+    /**
+     * <b>Why no {@code isolation = READ_COMMITTED} here</b>, when every other path that takes
+     * {@code findByIdForUpdate} declares it. This was audited, not overlooked.
+     *
+     * <p>MariaDB error 1020 ("Record has changed since last read") requires a <b>non-locking</b> read
+     * of a row, a concurrent commit to that row, and then {@code FOR UPDATE} on it, all in one
+     * REPEATABLE READ transaction. {@code credit}/{@code debit} hit exactly that — their
+     * idempotency-key lookup opens the snapshot before the account is locked — and returned 500s
+     * under concurrency until the isolation was set.
+     *
+     * <p>This method cannot: {@link PayoutRepository#claimDuePending} is itself
+     * {@code FOR UPDATE SKIP LOCKED}, and {@code compensate()} locks the account without ever having
+     * read it. A locking read always sees the latest committed row, so there is no stale snapshot to
+     * conflict with — a competing credit simply blocks until this transaction commits. Verified in
+     * SQL both ways.
+     *
+     * <p><b>If you add a non-locking read of an account before {@code compensate()}</b> — a balance
+     * check, a lookup, a projection — this method acquires the vulnerable shape and needs
+     * {@code READ_COMMITTED}. The failure would be quiet and nasty: compensation throws, the claim
+     * transaction rolls back, and a declined payout stays PENDING with the customer's money still
+     * debited.
+     */
     @Transactional
     public void drivePendingPayouts() {
         List<Payout> batch = payoutRepository.claimDuePending(Instant.now(), BATCH_SIZE);
