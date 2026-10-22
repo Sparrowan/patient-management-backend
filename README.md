@@ -229,10 +229,16 @@ patient-management/
 ├── docker-compose.yml   # every service + a MariaDB each + Kafka, Redis, Prometheus, Jaeger
 ├── generate-certs.sh    # regenerates the dev mTLS certs (run before build/run)
 ├── design.drawio        # whole-system architecture diagram
+├── docs/adr/            # architecture decision records — why we did NOT build something
 ├── CLAUDE.md            # architecture & coding conventions (read before contributing)
 ├── ROADMAP.md           # planned hardening work
 └── README.md
 ```
+
+Decisions that were deliberately *declined* live in [`docs/adr/`](docs/adr/) rather than the
+roadmap, because the reasoning has to outlive the plan — start with
+[ADR 0001: no sharding layer](docs/adr/0001-no-sharding-layer-country-is-the-shard-key.md), which
+explains why data residency already supplies the shard key and what the alternative would have cost.
 
 ## Development conventions
 

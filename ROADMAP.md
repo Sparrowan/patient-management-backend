@@ -453,12 +453,42 @@ system. The relationships are the findings:
       503** (verified: 6 rejections counted `ignored`, 0 `failed`, breaker stayed closed), and an
       open breaker **fails safe** — it refuses the delete rather than reading "no answer" as "billing
       has no objection", which would let a funded patient be deleted.
-- [ ] **E — Sharding: a decision record, not an implementation.** Deliberately *not* building it.
-      Data residency across the target markets forces per-country deployments anyway, which hands you
-      **country as a shard key** — a general sharding layer would solve a problem the regulator already
-      solved, via the most invasive change in the catalogue. The deliverable is the argument: why
-      per-country beats a sharding layer, what stays global (cross-border transfers, FX, group
-      reporting, a customer in two markets), and what would have to change to revisit it.
+- [x] **E — Sharding: a decision record, not an implementation.** Written up as
+      [ADR 0001](docs/adr/0001-no-sharding-layer-country-is-the-shard-key.md) — the first ADR, and the
+      convention for recording decisions that outlive a roadmap bullet. **Decision: no sharding layer;
+      deploy per country and let the regulator's boundary be the shard boundary.** Two facts decide
+      it. Residency has *already* partitioned the data by country, enforced by licence rather than by
+      a routing library — so there is no single logical dataset to shard. And nothing is near a
+      single-node limit: 14 connections per instance vs `max_connections=151` (~10 instances/DB), and
+      the one measured write ceiling is **per-account lock contention** (~200 credits/sec/account),
+      which sharding cannot raise because those rows are on one shard by definition.
+      The costs avoided are concrete rather than hypothetical, because this repo has already paid
+      smaller versions of both: `TransferServiceImpl` is local ACID *precisely because* "both accounts
+      live in this one database", so sharding by customer would turn every domestic transfer into a
+      saga; and the ledger archival work rejected partitioning because MariaDB forces every unique key
+      to contain the partition column (ERROR 1503), turning `UNIQUE (idempotency_key)` into
+      per-partition uniqueness — "a double-payment hole". Even the two-table split cost global
+      uniqueness, and sharding is that loss N times over *without* the atomic move that made it safe.
+      The ADR also assigns the genuinely global concerns a home (cross-border transfers → saga across
+      deployments; FX → replicated reference data with the rate pinned at quote; group reporting →
+      aggregates only, never raw rows across the border; a customer in two markets → **two records,
+      deliberately**), names fraud detection as the real counter-case (move signals, not records), and
+      lists the four conditions that would reopen it — none of which is "we have a lot of customers".
+
+**Plan complete (A–E).** The pattern worth keeping is that *every arc found something other than
+what it set out to find*, and three of them turned up live defects no test caught:
+
+| Arc | Set out to | Actually found |
+| --- | --- | --- |
+| A | add partitions | the DLT-width trap — a narrower DLT silently drops dead letters |
+| A.1 | *(unplanned)* | the outbox relay gap-locked `POST /patients` under a slow broker |
+| B | size pools | `spring.datasource.hikari.*` was **inert** (hand-built DataSources); scheduler pool was **1** |
+| C | find the write ceiling | **500s on concurrent credits** (missing `READ_COMMITTED`); the lock-ceiling hypothesis was wrong |
+| D | add a breaker | "kill the service" was the wrong experiment — a brownout is the expensive case, a hard-down one already fails in ~10ms |
+| E | argue against sharding | the argument was already *paid for* in the archival and transfer code |
+
+Two of the five disproved the prediction written in this plan. That is the measurement doing work
+rather than confirming what was already believed — and the habit worth carrying forward.
 
 ### What this environment cannot answer
 
