@@ -245,6 +245,23 @@ cross-reference the backend-patterns catalog we're prioritizing for banking/fint
 
 ### Security (regulated domain — PHI / financial)
 
+- [x] **Production-safety guards on auth-service** — found by asking "would an MVP of this survive
+      production?", and the answer was no for two reasons that were each sufficient on their own.
+      **(1)** `DataSeeder` was an unconditional `@Component`, so *any* empty database — production
+      included — came up with `admin`/`password` holding **`ROLE_ADMIN`**, the role that gates
+      credit, debit, transfer, payout and patient deletion. Guessable total control of the money
+      path on day one. Now opt-in via `auth.seed-default-admin`, defaulting to false, logging at
+      **WARN** when it fires. **(2)** `JwtKeysConfig` generated an **ephemeral** RSA key per
+      start-up: every restart invalidated every live token, and two replicas signed with different
+      keys so verification failed across them — auth was the one service that could not be scaled
+      horizontally. Now loads a persistent JWK from `auth.jwt.key-location`, with a missing path
+      failing start-up rather than falling back silently.
+      Chose an explicit property over `@Profile("!prod")` because a negated profile is fail-**open**
+      and there is no `prod` profile in this repo at all. 9 tests, mutation-verified: restoring the
+      unconditional `@Component` fails 3, restoring the silent key fallback fails 1. **Both defects
+      were documented and unimplemented** — the javadoc said "in production you'd disable seeding"
+      and "production loads a persistent key". Comments are not controls.
+
 - [~] **`auth-service`** — JWT issuer (Spring Security 6): `/register` + `/login` (username-or-email,
       BCrypt, DB users), RSA/RS256 tokens, JWKS endpoint. **patient-service secured** as a resource
       server (validates against JWKS). **RBAC**, **billing secured**, **sync gRPC identity propagation**
