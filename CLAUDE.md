@@ -31,6 +31,7 @@ patient-management/
 ├── api-gateway/         # Spring Cloud Gateway — single entry point, routes to all services (:4004)
 ├── analytics-service/   # CQRS read side: projects patient-events into read models (:4003)
 ├── loadtest/            # k6 / ApacheBench scripts + the measured scale audit
+├── docs/adr/            # architecture decision records — one file per decision, numbered
 ├── design.drawio        # whole-system architecture diagram (uncompressed, hand-editable)
 └── docker-compose.yml   # root orchestration: every service + a DB container each + Kafka/SR
 ```
@@ -178,6 +179,14 @@ com.pm.<service>/
 - **Documentation**: comment the *why*, not the *what*. Javadoc on public API (service
   interfaces, custom exceptions, non-obvious contracts) + "why" notes where reality is
   surprising. No comments that restate code, no commented-out code, rely on clear names.
+- **A decision we deliberately did *not* implement goes in `docs/adr/`**, numbered, one file per
+  decision — not in a roadmap bullet, which records *state* and gets ticked. An ADR records the
+  *argument*, including what it costs and what would reopen it, and outlives the plan that prompted
+  it. The test for whether something needs one: would a competent engineer arriving later reasonably
+  propose the thing we rejected? If yes, the reasoning has to be findable, or they will build it.
+  First one is [ADR 0001](docs/adr/0001-no-sharding-layer-country-is-the-shard-key.md) (no sharding
+  layer). Keep the "when to revisit" section honest and specific — an ADR with no reopening
+  conditions is dogma, not a decision.
 - **DTOs are `record`s**; entity↔DTO mapping is a MapStruct `@Mapper` interface (never
   hand-written). Use real types (`UUID`, `LocalDate`) in DTOs — Jackson serializes them and
   MapStruct maps 1:1 with no conversion.
