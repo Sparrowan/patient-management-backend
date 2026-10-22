@@ -409,15 +409,21 @@ system. The relationships are the findings:
       between the two is already safe (consumers are idempotent on `eventId`), so at-least-once is
       preserved. Worth doing before C, since write-path load testing will hit this.
 
-- [ ] **A — Kafka partitions + multi-instance consumer proof.** `patient-events` has
-      **`PartitionCount: 1`** today, so consumer parallelism in a group is 1 *regardless of replica
-      count* — scale `billing-service` to ten and nine sit idle. The most dangerous class of scaling
-      bug: a single instance works perfectly, so it only appears at the moment you reach for the fix.
-      Raise it declaratively (a `NewTopic` bean, not a CLI command), then prove work splits across two
-      consumer instances and that per-aggregate ordering still holds (key = `patientId`). Note both
-      hazards: partitions can be added but never removed, and adding them re-maps keys to partitions,
-      so one aggregate's events can briefly land out of order across the change. **Blocks every other
-      multi-instance experiment**, so it goes first.
+- [x] **A — Kafka partitions + multi-instance consumer proof.** DONE. `patient-events` had
+      **`PartitionCount: 1`**, so consumer parallelism in a group was 1 *regardless of replica count*
+      — scale `billing-service` to ten and nine sit idle. The most dangerous class of scaling bug: a
+      single instance works perfectly, so it only appears at the moment you reach for the fix. Now
+      declared at **3** via a `NewTopic` bean (`KafkaAdmin` widens an existing topic at start-up), as
+      a **constant rather than a property** — `hash(key) % partitions` *is* the ordering semantics, so
+      it must not drift per environment. Verified with `--scale billing-service=3`: one partition per
+      replica, per-aggregate ordering intact (key = `patientId`).
+      **The finding was the DLT.** `DeadLetterPublishingRecoverer` resolves its target as
+      `new TopicPartition(topic + ".DLT", record.partition())` — it reuses the *failed partition
+      number*, so a DLT narrower than its source topic silently drops dead letters from the
+      high-numbered partitions. Both consumers now declare `patient-events.DLT` at a matching 3, with
+      tests pinning the counts, because nothing in the functional suite reaches that path.
+      Both one-way doors noted: partitions can be added but never removed, and adding them re-maps
+      keys, so one aggregate's events can briefly land out of order across the change.
 - [x] **B — Scheduler and connection-pool sizing.** DONE. Three findings, two worse than planned.
       **(1)** The scheduler pool was **one thread** (measured, not assumed) — every `@Scheduled` job
       in a service serialised behind the slowest, so billing's ledger archive sweep (up to 10,000

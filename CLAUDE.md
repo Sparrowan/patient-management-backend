@@ -47,7 +47,11 @@ gateway. `docker compose up` without `--scale` silently scales back to one, so u
 
 Each service holds its own copy of `billing.proto` under `src/main/proto/` and generates its own
 stubs — a deliberate trade-off to keep services independently buildable (no shared module / no
-reactor). Drift between copies is caught by a contract test (see ROADMAP).
+reactor). **Drift between the copies is currently unguarded** — a contract test is planned (see
+ROADMAP) and does not exist yet, so for now the copies are kept in step by hand. The same gap applies
+to the `.avsc` schemas and to `KafkaTopicConfig.PARTITIONS`, which is duplicated across three
+services with only a per-service unit test pinning each copy. This is the one risk the
+independent-builds trade-off created and has not yet paid for.
 
 ## Per-service package structure (layered)
 
@@ -78,7 +82,9 @@ com.pm.<service>/
   validates against) — Flyway migrations use `id UUID`, not `BINARY(16)`.
 - **Migration versions are a shared namespace git cannot referee.** Two branches can each add
   `V12__…`, merge cleanly, and fail only at application start-up. `scripts/check-migration-versions.sh`
-  catches duplicates per service at PR time. **Kept sequential rather than switching to timestamps**:
+  detects duplicates per service — but **nothing runs it automatically**: there is no CI, so it is a
+  manual check until there is. Run it before opening a PR that adds a migration.
+  **Kept sequential rather than switching to timestamps**:
   timestamps make collisions impossible but make *out-of-order* merges silent, and an untested apply
   order in production is worse than a loud failure in CI. Revisit if several people work this schema
   at once.
