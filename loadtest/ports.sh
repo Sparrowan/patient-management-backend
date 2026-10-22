@@ -23,12 +23,27 @@ CONTAINER_PORT="${2:?usage: ports.sh <compose-service> <container-port>}"
 cd "$(dirname "$0")/.."
 
 # `compose port` resolves through the compose project, so it works without a container_name.
-mapping=$(docker compose port "$SERVICE" "$CONTAINER_PORT" 2>/dev/null || true)
+# "0.0.0.0:4013" -> "4013"
+port="$(docker compose port "$SERVICE" "$CONTAINER_PORT" 2>/dev/null | tail -1)"
+port="${port##*:}"
 
-if [[ -z "$mapping" ]]; then
+# `compose port` returns ":0" after a `docker compose restart` -- the mapping is live and the
+# container is serving, but compose reports a zero port. That is worse than an empty answer,
+# because ":0" is non-empty and parses to the plausible-looking "0", so a naive check passes it
+# through and every later request goes to port 0 and fails as "connection refused" -- which looks
+# exactly like a service that is down. This cost a false "LOGIN FAILED" diagnosis once already.
+# So: validate the result is a real port, and fall back to reading the mapping off the container.
+if [[ ! "$port" =~ ^[1-9][0-9]*$ ]]; then
+    port="$(docker compose ps "$SERVICE" --format '{{.Ports}}' 2>/dev/null \
+        | tr ',' '\n' \
+        | grep -oE "[0-9]+->${CONTAINER_PORT}/tcp" \
+        | grep -oE '^[0-9]+' \
+        | head -1)"
+fi
+
+if [[ ! "$port" =~ ^[1-9][0-9]*$ ]]; then
     echo "could not resolve a host port for $SERVICE:$CONTAINER_PORT -- is it running?" >&2
     exit 1
 fi
 
-# "0.0.0.0:4013" -> "4013"
-printf '%s' "${mapping##*:}"
+printf '%s' "$port"

@@ -310,6 +310,11 @@ services:
       DB_URL: jdbc:mariadb://auth-service-db:3306/auth_db
       DB_USERNAME: auth
       DB_PASSWORD: auth
+      # Seed admin/password with ROLE_ADMIN so the stack is usable out of the box. This compose
+      # file is a LOCAL development harness, which is the only place this belongs: ROLE_ADMIN gates
+      # every money movement, so a real deployment provisions its first admin out-of-band and
+      # leaves this unset (it defaults to false).
+      SEED_DEFAULT_ADMIN: "true"
       # Export trace spans (OTLP/HTTP) to the Jaeger container.
       OTLP_TRACING_ENDPOINT: http://jaeger:4318/v1/traces
     ports:

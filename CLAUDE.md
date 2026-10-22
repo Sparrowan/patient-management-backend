@@ -198,6 +198,25 @@ com.pm.<service>/
   (loaded by spring-dotenv, git-ignored); prod injects real env vars via the orchestrator and
   secrets via Vault/k8s Secrets — never a committed file. Every externalized var is documented
   in the committed `.env.example`, each with a safe default.
+- **A dev convenience that is dangerous in production must be opt-in, never opt-out.** Default to
+  the safe behaviour and require an explicit `=true` to enable the unsafe one, so the *absence* of
+  configuration is safe and forgetting a setting cannot hurt you. Two real cases, both of which
+  would have shipped:
+  - `DataSeeder` created `admin`/`password` with **`ROLE_ADMIN`** — the role that gates every money
+    movement — on any empty database, in every environment. Now `@ConditionalOnProperty` on
+    `auth.seed-default-admin`, and it logs at **WARN** when it fires, because that line appearing in
+    a production log is an incident.
+  - `JwtKeysConfig` generated an **ephemeral** RSA signing key per start-up, which invalidates every
+    live token on restart *and* makes auth unscalable (two replicas sign with different keys, so
+    verification fails across them). Now loads a persistent JWK from `auth.jwt.key-location`.
+  - **Prefer a property over `@Profile("!prod")`.** A negated profile is fail-**open**: an unset or
+    mistyped `SPRING_PROFILES_ACTIVE` re-enables the unsafe path. There was no `prod` profile in
+    this repo at all, so that guard would have protected nothing.
+  - **A configured-but-missing resource fails start-up; it never falls back.** A silent fallback
+    turns a mistyped secret mount into exactly the invisible breakage the guard exists to prevent.
+  - **Both were documented and unimplemented** — the javadoc said "in production you'd disable
+    seeding" and "production loads a persistent key". Comments are not controls; if it matters, it
+    needs a condition and a test.
 
 ### REST / API conventions
 
