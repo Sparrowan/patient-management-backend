@@ -251,7 +251,18 @@ cross-reference the backend-patterns catalog we're prioritizing for banking/fint
       (patient→billing veto forwards the caller's `sub` as `x-actor-id` metadata), and **async
       actor-in-event** (`PatientRegistered` carries an `actor` field → billing audits the opened account
       as the registering user) all done — both cross-service boundaries now attribute the real user, not
-      `"system"`. Next: **ABAC**/least-privilege. `[#27/#28/#29]`
+      `"system"`. **Now tested** (it had none, while issuing the tokens every other service trusts):
+      17 tests over the **token claim set as a cross-service contract** (`sub` is the stable id not
+      the username, `roles` space-separated and already `ROLE_`-prefixed, RS256, kid matches JWKS),
+      the register/login flow (BCrypt-only storage, 409 on duplicates, 400 before any write), and
+      JWKS. Mutation-tested: `sub`→username fails 2, stripping `ROLE_` fails 1, a wrong published
+      `kid` fails 1. Two findings recorded in the tests themselves — the "never leaks the private
+      key" assertion **cannot fail** (Nimbus's `toJSONObject()` omits private material
+      unconditionally, so it guards the dependency rather than our `toPublicJWK()` call), and the
+      first login-error assertion was wrong, not the code: `"invalid username or password"` is the
+      correct generic message, so the test now asserts the real property — an unknown user and a
+      wrong password are **byte-identical**, leaving no enumeration oracle.
+      Next: **ABAC**/least-privilege. `[#27/#28/#29]`
 - [~] **Zero-trust inter-service security** (never trust the network; encrypt + authenticate +
       authorize *every* call): `[#33]`
   - [x] **mTLS** between services — app-level mTLS on the patient↔billing gRPC call (dev

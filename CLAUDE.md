@@ -119,10 +119,29 @@ com.pm.<service>/
   - **A concurrency test must force the collision**: same row, ≥10 simultaneous writers. Spread the
     load across distinct rows and every assertion passes while the bug sits there — the same trap
     the outbox claim-lease test first fell into. Found by load test, not by the suite; see
-    `ConcurrentMoneyMovementIntegrationTest` and `loadtest/README.md`. Corollary: a test that cannot
-    fail is not worth keeping — a regression test written for the payout worker passed against the
-    unfixed code, which is how the audit above established the path was *already* safe; the reasoning
-    lives in that method's javadoc instead.
+    `ConcurrentMoneyMovementIntegrationTest` and `loadtest/README.md`.
+- **Mutation-test anything that guards a silent failure.** Break the code deliberately and confirm
+  the test goes red; a green suite proves nothing until you have seen it fail. This has caught four
+  toothless tests in this repo, which is why it is a convention and not advice:
+  - the outbox claim-lease test passed against the gap-locking bug (it seeded as many rows as it
+    claimed, so the scan never locked the supremum gap);
+  - `OutboxRelayTest`'s assertions went vacuous after a refactor (checking entity state the relay no
+    longer mutates);
+  - a payout-worker regression test passed against the unfixed code — which is how the audit
+    established that path was *already* safe;
+  - auth's "JWKS never leaks the private key" **cannot fail**: Nimbus's `JWKSet.toJSONObject()`
+    omits private material unconditionally, so it guards the dependency, not our `toPublicJWK()`.
+  **A test that cannot fail is not worth keeping** — delete it, or keep it with the reason it is
+  unfalsifiable written down, so a green tick is never mistaken for proof.
+- **Verify the mutant compiled.** Maven reuses stale classes, so a mutant with a compile error
+  produces a passing run that looks like a toothless test. Check for `[ERROR]` before believing a
+  green result, and `clean` before trusting a suite total — the same stale-`target` family as the
+  orphaned `.class` files that kept running a deleted test.
+- **When a test fails, decide whether the test or the code is wrong.** Auth's first login-error
+  assertion banned the substring `"password"`; the actual response,
+  `"invalid username or password"`, is the *correct* generic wording and legitimately contains it.
+  The fix was to assert the real property — an unknown user and a wrong password must be
+  **byte-identical**, leaving no enumeration oracle — not to loosen the assertion until it passed.
 - **Relationships & N+1**: prefer **ID references** (a `UUID` field + DB FK) over JPA associations
   across aggregates — no lazy navigation, no N+1 (e.g. `LedgerEntry.accountId`, not
   `@ManyToOne`). Where an association *is* modeled, keep it `LAZY` (override `@ManyToOne`'s EAGER
@@ -380,6 +399,13 @@ compilation problems` / `No qualifying bean of type PatientMapper` at startup). 
 - [x] **auth-service** (`:4002`) — Spring Security 6 JWT issuer. `/register` + `/login` (login by
       username **or** email; BCrypt; DB-backed `UserDetailsService`), RSA-signed (RS256) tokens via
       `NimbusJwtEncoder`, public keys served at `/oauth2/jwks`. Users in MariaDB (`auth_db`, Flyway).
+      **17 tests** (it had none while issuing the tokens every other service trusts). The core of them
+      treats the **claim set as a cross-service contract**, because nothing in auth breaks if a claim
+      changes — the damage lands in four other services at runtime: `sub` must be the stable user
+      **id** (persisted downstream as `created_by`/`updated_by`, so a username there would rot on a
+      rename), `roles` must be space-separated and **already `ROLE_`-prefixed** (patient-service maps
+      it with an *empty* authority prefix, so dropping the prefix makes `hasRole('ADMIN')` fail closed
+      and every admin gets 403 on money movement), RS256, and a `kid` matching the JWKS key.
 - [x] **patient-service secured as a resource server** — `spring.security.oauth2.resourceserver.jwt.jwk-set-uri`
       → auth's JWKS; `/api/**` requires a valid JWT (verified locally, stateless), `/actuator/**` +
       swagger stay public. Tests: `@WithMockUser` (web slice), mocked `JwtDecoder` + a real 401 test.
